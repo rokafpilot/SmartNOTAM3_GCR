@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart NOTAM - 대한항공 NOTAM 처리 시스템</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('index') }}">
+                <i class="fas fa-plane me-2"></i>
+                Smart NOTAM
+            </a>
+            <span class="navbar-text">
+                대한항공 NOTAM 처리 시스템
+            </span>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                    {% for message in messages %}
+                        {{ message }}
+                    {% endfor %}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="row">
+            <div class="col-md-8 mx-auto">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h4 class="mb-0">
+                            <i class="fas fa-file-pdf me-2"></i>
+                            NOTAM PDF 업로드
+                        </h4>
+                    </div>
+                    <div class="card-body">
+
+                        <form action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data" id="uploadForm">
+                            <div class="mb-3">
+                                <label for="file" class="form-label">PDF 파일 선택</label>
+                                <input type="file" class="form-control" id="file" name="file" accept=".pdf" required>
+                                <div class="form-text">
+                                    대한항공 NOTAM PDF 파일을 업로드하세요. (최대 16MB)
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="includeCoords" name="includeCoords" checked>
+                                        <label class="form-check-label" for="includeCoords">
+                                            지도에 좌표 표시
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="d-grid gap-2 mt-3">
+                                <button type="submit" class="btn btn-primary btn-lg">
+                                    <i class="fas fa-upload me-2"></i>
+                                    NOTAM 처리 시작
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-5">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-info-circle me-2"></i>
+                            시스템 기능
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <i class="fas fa-file-alt text-primary fa-3x mb-3"></i>
+                                    <h6>PDF 변환</h6>
+                                    <p class="text-muted small">
+                                        PDF 파일을 텍스트로 정확하게 변환
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <i class="fas fa-filter text-success fa-3x mb-3"></i>
+                                    <h6>NOTAM 필터링</h6>
+                                    <p class="text-muted small">
+                                        대한항공 관련 NOTAM만 자동 추출
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <i class="fas fa-language text-warning fa-3x mb-3"></i>
+                                    <h6>자동 번역</h6>
+                                    <p class="text-muted small">
+                                        영문 NOTAM을 한국어로 번역
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <i class="fas fa-map-marker-alt text-danger fa-3x mb-3"></i>
+                                    <h6>지도 표시</h6>
+                                    <p class="text-muted small">
+                                        Google Maps에 위치 정보 표시
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">
+                            <i class="fas fa-question-circle me-2"></i>
+                            사용 방법
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <ol class="list-unstyled">
+                            <li class="mb-2">
+                                <span class="badge bg-primary rounded-pill me-2">1</span>
+                                대한항공에서 제공하는 NOTAM PDF 파일을 준비합니다.
+                            </li>
+                            <li class="mb-2">
+                                <span class="badge bg-primary rounded-pill me-2">2</span>
+                                위의 파일 선택 버튼을 클릭하여 PDF 파일을 업로드합니다.
+                            </li>
+                            <li class="mb-2">
+                                <span class="badge bg-primary rounded-pill me-2">3</span>
+                                옵션을 선택하고 "NOTAM 처리 시작" 버튼을 클릭합니다.
+                            </li>
+                            <li class="mb-2">
+                                <span class="badge bg-primary rounded-pill me-2">4</span>
+                                처리된 결과를 확인하고 필요에 따라 필터링합니다.
+                            </li>
+                            <li>
+                                <span class="badge bg-primary rounded-pill me-2">5</span>
+                                지도에서 NOTAM 위치를 확인하고 브리핑을 생성합니다.
+                            </li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-light mt-5 py-4">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6">
+                    <p class="text-muted mb-0">
+                        &copy; 2024 Smart NOTAM System
+                    </p>
+                </div>
+                <div class="col-md-6 text-end">
+                    <p class="text-muted mb-0">
+                        <i class="fas fa-code me-1"></i>
+                        Powered by Flask & Python
+                    </p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <div id="loadingModal" class="modal fade" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-body text-center">
+                    <div class="spinner-border text-primary mb-3" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <h5>NOTAM 처리 중...</h5>
+                    <p class="text-muted">PDF 변환, 필터링, 번역 작업을 진행하고 있습니다.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    
+    <script>
+        // 파일 선택시 공항 코드 미리 추출 (정보 표시용)
+        async function extractAirportsFromFile(file) {
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const response = await fetch('/api/extract_airports', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // 정보 알림 표시
+                    if (data.airports.length > 0) {
+                        const alertDiv = document.createElement('div');
+                        alertDiv.className = 'alert alert-info alert-dismissible fade show mt-2';
+                        alertDiv.innerHTML = `
+                            <i class="fas fa-info-circle me-2"></i>
+                            PDF에서 <strong>${data.airports.length}개의 공항</strong>을 발견했습니다. (총 ${data.notam_count}개 NOTAM)
+                            <br><small class="text-muted">업로드 후 결과 화면에서 시간 및 공항 필터링을 적용할 수 있습니다.</small>
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        `;
+                        
+                        // 메인 카드 하단에 표시
+                        const cardBody = document.querySelector('.card-body');
+                        cardBody.appendChild(alertDiv);
+                        
+                        // 5초 후 자동 삭제
+                        setTimeout(() => {
+                            if (alertDiv.parentNode) {
+                                alertDiv.remove();
+                            }
+                        }, 5000);
+                    }
+                } else {
+                    console.error('공항 추출 오류:', await response.json());
+                }
+            } catch (error) {
+                console.error('공항 추출 중 오류:', error);
+            }
+        }
+        
+        // 페이지 로드시 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            // 파일 선택 이벤트 - 공항 코드 미리 추출
+            document.getElementById('file').addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file && file.type === 'application/pdf') {
+                    extractAirportsFromFile(file);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,176 @@
+# 바이트 컴파일된 파이썬 파일
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C 확장
+*.so
+
+# 배포
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# 단위 테스트 / 커버리지 리포트
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# celery beat schedule file
+celerybeat-schedule
+
+# SageMath parsed files
+*.sage.py
+
+# 환경 변수
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Windows
+*.exe
+*.msi
+*.cab
+*.msm
+*.msp
+
+# 업로드된 파일
+uploads/
+*.pdf
+*.txt
+*.csv
+
+# 로그 파일
+*.log
+logs/
+
+# 임시 파일
+temp/
+tmp/
+*.tmp
+
+# 백업 파일
+*.bak
+*.backup
+
+# 압축 파일 (개발용)
+*.zip
+*.tar.gz
+*.rar
+
+# 데이터베이스 파일
+*.db
+*.sqlite
+*.sqlite3
+
+# API 키 파일
+config.py
+secrets.py
+api_keys.py
+
+# 프로덕션 설정
+production.py
+prod_config.py
+
+# 테스트 파일
+test_files/
+sample_data/
+
+# 캐시 파일
+.cache/
+cache/
+
+# 세션 파일
+flask_session/

@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOTAM 처리 결과 - Smart NOTAM</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #f8f9fa;
+            padding-top: 2rem;
+        }
+        .container {
+            max-width: 1200px;
+        }
+        .card {
+            margin-bottom: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .translation-text {
+            white-space: normal;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            text-align: left;
+            word-wrap: break-word;
+            padding: 10px;
+        }
+        .nav-tabs .nav-link {
+            color: #495057;
+            border: 1px solid transparent;
+            border-top-left-radius: 0.25rem;
+            border-top-right-radius: 0.25rem;
+        }
+        .nav-tabs .nav-link:hover {
+            border-color: #e9ecef #e9ecef #dee2e6;
+        }
+        .nav-tabs .nav-link.active {
+            color: #495057;
+            background-color: #fff;
+            border-color: #dee2e6 #dee2e6 #fff;
+        }
+        .tab-content {
+            border: 1px solid #dee2e6;
+            border-top: 0;
+            padding: 1rem;
+            background-color: #fff;
+        }
+        .card-header-tabs {
+            margin-bottom: -1px;
+        }
+        .badge {
+            margin-left: 10px;
+        }
+        .time-filter-controls {
+            background-color: #e9ecef;
+            padding: 1rem;
+            border-radius: 0.375rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>NOTAM 목록</h1>
+            <a href="{{ url_for('index') }}" class="btn btn-primary">
+                새 파일 업로드
+            </a>
+        </div>
+        
+        <!-- 시간 필터 제어 -->
+        <div class="time-filter-controls">
+            <div class="row align-items-center mb-3">
+                <div class="col-md-12">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">NOTAM 필터 설정</h5>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="timeFilterSwitch">
+                            <label class="form-check-label" for="timeFilterSwitch">
+                                시간 필터링
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 시간 설정 카드 (항상 표시) -->
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title">시간 필터 (로컬 시간)</h6>
+                    <div class="row g-3" id="timeFilterInputs">
+                        <div class="col-md-3">
+                            <label class="form-label">시작 날짜</label>
+                            <input type="date" class="form-control" id="startDate" value="{{ current_date }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">종료 날짜</label>
+                            <input type="date" class="form-control" id="endDate" value="{{ current_date }}">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">시작 시간</label>
+                            <input type="time" class="form-control" id="startTime" value="00:00">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">종료 시간</label>
+                            <input type="time" class="form-control" id="endTime" value="23:59">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">&nbsp;</label>
+                            <button type="button" class="btn btn-primary d-block w-100" id="applyFilterBtn">
+                                <i class="fas fa-search"></i> 적용
+                            </button>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-md-12">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="resetFilterBtn">
+                                <i class="fas fa-undo"></i> 초기화
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 공항 필터 섹션 -->
+        <div class="card mb-3">
+            <div class="card-body">
+                <h6 class="card-title">공항 필터</h6>
+                <div class="row">
+                    <div class="col-md-8">
+                        <div id="airportFilter" class="d-flex flex-wrap gap-2">
+                            <!-- 공항 체크박스들이 여기에 동적으로 추가됩니다 -->
+                            <div class="text-muted">공항 목록을 로드하는 중...</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="selectAllAirports">전체 선택</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="clearAllAirports">전체 해제</button>
+                            <button type="button" class="btn btn-primary btn-sm" id="applyAirportFilter">필터 적용</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 요약 정보 -->
+        <div class="alert alert-info" id="filterStatus">
+            전체 NOTAM: {{ notams|length }}개 (시간 필터링 비활성화 - 모든 NOTAM 표시)
+            {% if all_airports %}
+            <br><strong>포함된 공항:</strong> 
+            {% for airport in all_airports %}
+                <span class="badge bg-secondary me-1">{{ airport }}</span>
+            {% endfor %}
+            {% endif %}
+        </div>
+
+        <!-- NOTAM 목록 -->
+        <div id="notamContainer">
+            {% for notam in notams %}
+            <div class="card mb-4 notam-item" data-effective-time="{{ notam.effective_time }}" data-expiry-time="{{ notam.expiry_time }}">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        NOTAM #{{ loop.index }}
+                        <span class="badge bg-success float-end notam-status">활성</span>
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-12">
+                            <table class="table">
+                                <tr>
+                                    <th style="width: 150px;">NOTAM 번호</th>
+                                    <td>{{ notam.id }}</td>
+                                </tr>
+                                {% if notam.airport_codes %}
+                                <tr>
+                                    <th>관련 공항</th>
+                                    <td>
+                                        {% for airport in notam.airport_codes %}
+                                            <span class="badge bg-primary me-1">{{ airport }}</span>
+                                        {% endfor %}
+                                    </td>
+                                </tr>
+                                {% endif %}
+                                <tr>
+                                    <th>유효시간</th>
+                                    <td>{{ notam.local_time_display|default(notam.effective_time|default('N/A') ~ ' ~ ' ~ notam.expiry_time|default('N/A')) }}</td>
+                                </tr>
+                                <tr>
+                                    <th>원문</th>
+                                    <td>{{ notam.description|default(notam.original_text|default(notam.raw_text)) }}</td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- 영어 번역 -->
+                    <div class="mt-3">
+                        <h6 class="text-primary mb-2">🔤 영어 번역</h6>
+                        <div class="translation-text bg-light p-3 rounded">
+                            {{ notam.english_translation|default('Translation in progress...') }}
+                        </div>
+                    </div>
+                    
+                    <!-- 한국어 번역 -->
+                    <div class="mt-3">
+                        <h6 class="text-success mb-2">🇰🇷 한국어 번역</h6>
+                        <div class="translation-text bg-light p-3 rounded korean-translation">
+                            {{ notam.korean_translation|default('번역 준비 중...') }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <!-- 통합 번역/요약 탭 (화면 최하단) -->
+        <div class="mt-5 mb-5">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0">📋 전체 NOTAM 번역 및 요약</h4>
+                    <small class="text-muted" id="summaryFilterStatus">
+                        시간 필터링이 적용되면 해당 NOTAM만 표시됩니다.
+                    </small>
+                </div>
+                <div class="card-body">
+                    <ul class="nav nav-tabs" id="summaryTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="all-korean-tab" data-bs-toggle="tab" data-bs-target="#all-korean" type="button" role="tab">
+                                🇰🇷 전체 한국어 번역
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="all-english-tab" data-bs-toggle="tab" data-bs-target="#all-english" type="button" role="tab">
+                                🔤 전체 영어 번역
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="all-korean-summary-tab" data-bs-toggle="tab" data-bs-target="#all-korean-summary" type="button" role="tab">
+                                📄 전체 한국어 요약
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="all-english-summary-tab" data-bs-toggle="tab" data-bs-target="#all-english-summary" type="button" role="tab">
+                                📄 전체 영어 요약
+                            </button>
+                        </li>
+                    </ul>
+                    
+                    <div class="tab-content mt-3" id="summaryTabContent">
+                        <!-- 전체 한국어 번역 -->
+                        <div class="tab-pane fade show active" id="all-korean" role="tabpanel">
+                            <div class="summary-content">
+                                {% for notam in notams %}
+                                <div class="notam-summary-item mb-4" data-notam-index="{{ loop.index }}" data-effective-time="{{ notam.effective_time }}" data-expiry-time="{{ notam.expiry_time }}" data-airport-code="{{ notam.airport_code }}">
+                                    <h6 class="text-primary">
+                                        NOTAM #{{ loop.index }} ({{ notam.id }})
+                                        <span class="badge bg-primary ms-2">{{ notam.airport_code }}</span>
+                                    </h6>
+                                    <div class="translation-text bg-light p-3 rounded korean-translation">
+                                        {{ notam.korean_translation|default('번역 준비 중...') }}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        
+                        <!-- 전체 영어 번역 -->
+                        <div class="tab-pane fade" id="all-english" role="tabpanel">
+                            <div class="summary-content">
+                                {% for notam in notams %}
+                                <div class="notam-summary-item mb-4" data-notam-index="{{ loop.index }}" data-effective-time="{{ notam.effective_time }}" data-expiry-time="{{ notam.expiry_time }}" data-airport-code="{{ notam.airport_code }}">
+                                    <h6 class="text-info">
+                                        NOTAM #{{ loop.index }} ({{ notam.id }})
+                                        <span class="badge bg-primary ms-2">{{ notam.airport_code }}</span>
+                                    </h6>
+                                    <div class="translation-text bg-light p-3 rounded">
+                                        {{ notam.english_translation|default('Translation in progress...') }}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        
+                        <!-- 전체 한국어 요약 -->
+                        <div class="tab-pane fade" id="all-korean-summary" role="tabpanel">
+                            <div class="summary-content">
+                                {% for notam in notams %}
+                                <div class="notam-summary-item mb-4" data-notam-index="{{ loop.index }}" data-effective-time="{{ notam.effective_time }}" data-expiry-time="{{ notam.expiry_time }}" data-airport-code="{{ notam.airport_code }}">
+                                    <h6 class="text-success">
+                                        NOTAM #{{ loop.index }} ({{ notam.id }})
+                                        <span class="badge bg-primary ms-2">{{ notam.airport_code }}</span>
+                                    </h6>
+                                    <div class="translation-text bg-light p-3 rounded korean-translation">
+                                        {{ notam.korean_summary|default('요약 준비 중...') }}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        
+                        <!-- 전체 영어 요약 -->
+                        <div class="tab-pane fade" id="all-english-summary" role="tabpanel">
+                            <div class="summary-content">
+                                {% for notam in notams %}
+                                <div class="notam-summary-item mb-4" data-notam-index="{{ loop.index }}" data-effective-time="{{ notam.effective_time }}" data-expiry-time="{{ notam.expiry_time }}" data-airport-code="{{ notam.airport_code }}">
+                                    <h6 class="text-warning">
+                                        NOTAM #{{ loop.index }} ({{ notam.id }})
+                                        <span class="badge bg-primary ms-2">{{ notam.airport_code }}</span>
+                                    </h6>
+                                    <div class="translation-text bg-light p-3 rounded">
+                                        {{ notam.english_summary|default('Summary in progress...') }}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-light mt-5 py-4">
+        <div class="container text-center">
+            <p class="text-muted mb-0">
+                Smart NOTAM &copy; 2025. 항공 정보 번역 시스템
+            </p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let totalNotams = {{ notams|length }};
+        
+        // 시간 필터 토글
+        document.getElementById('timeFilterSwitch').addEventListener('change', function() {
+            const timeFilterCard = document.querySelector('.time-filter-controls .card');
+            const applyBtn = document.getElementById('applyFilterBtn');
+            
+            if (this.checked) {
+                // 필터링 활성화 - 카드 활성화 스타일
+                timeFilterCard.classList.remove('disabled');
+                timeFilterCard.style.opacity = '1';
+                applyBtn.disabled = false;
+                
+                // 상태 메시지 업데이트
+                document.getElementById('filterStatus').textContent = 
+                    `전체 NOTAM: ${totalNotams}개 (시간 필터 설정 후 '적용' 버튼을 클릭하세요)`;
+                document.getElementById('summaryFilterStatus').textContent = 
+                    `시간 범위를 설정하고 '적용' 버튼을 클릭하여 필터링하세요`;
+            } else {
+                // 필터링 비활성화 - 카드 비활성화 스타일
+                timeFilterCard.classList.add('disabled');
+                timeFilterCard.style.opacity = '0.6';
+                applyBtn.disabled = true;
+                
+                // 모든 NOTAM 표시
+                showAllNotams();
+            }
+        });
+
+        // 적용 버튼 이벤트
+        document.getElementById('applyFilterBtn').addEventListener('click', function() {
+            if (document.getElementById('timeFilterSwitch').checked) {
+                applyTimeFilter();
+            }
+        });
+
+        // 초기화 버튼 이벤트
+        document.getElementById('resetFilterBtn').addEventListener('click', function() {
+            // 시간 입력값 초기화
+            document.getElementById('startDate').value = '{{ current_date }}';
+            document.getElementById('endDate').value = '{{ current_date }}';
+            document.getElementById('startTime').value = '06:00';
+            document.getElementById('endTime').value = '08:00';
+            
+            // 필터링이 켜져 있으면 적용
+            if (document.getElementById('timeFilterSwitch').checked) {
+                applyTimeFilter();
+            }
+        });
+
+        // Enter 키로도 필터 적용 가능
+        ['startDate', 'endDate', 'startTime', 'endTime'].forEach(id => {
+            document.getElementById(id).addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    document.getElementById('applyFilterBtn').click();
+                }
+            });
+        });
+
+        function applyTimeFilter() {
+            if (!document.getElementById('timeFilterSwitch').checked) {
+                return;
+            }
+
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const startTime = document.getElementById('startTime').value;
+            const endTime = document.getElementById('endTime').value;
+
+            console.log('필터 입력값:', { startDate, endDate, startTime, endTime });
+
+            if (!startDate || !endDate || !startTime || !endTime) {
+                alert('모든 시간 필드를 입력해주세요.');
+                return;
+            }
+
+            const filterStart = new Date(startDate + 'T' + startTime);
+            const filterEnd = new Date(endDate + 'T' + endTime);
+            
+            console.log('필터 범위:', filterStart, '~', filterEnd);
+
+            let visibleCount = 0;
+            const notamItems = document.querySelectorAll('.notam-item');
+            console.log('총 NOTAM 수:', notamItems.length);
+
+            notamItems.forEach((item, index) => {
+                const effectiveTime = item.dataset.effectiveTime;
+                const expiryTime = item.dataset.expiryTime;
+                
+                console.log(`NOTAM ${index + 1} 원본 시간:`, { 
+                    effectiveTime, 
+                    expiryTime,
+                    hasEffective: !!effectiveTime,
+                    hasExpiry: !!expiryTime,
+                    isUFN: expiryTime === 'UFN'
+                });
+                
+                let isVisible = true;
+                
+                // 실제 시간 필터링 로직
+                if (effectiveTime && expiryTime && effectiveTime !== 'UFN' && expiryTime !== 'UFN') {
+                    try {
+                        // NOTAM 시간 문자열을 Date 객체로 변환
+                        let notamStart, notamEnd;
+                        
+                        console.log(`NOTAM ${index + 1} 원본 데이터:`, { effectiveTime, expiryTime });
+                        
+                        // UTC 시간을 로컬 시간으로 변환하여 비교
+                        if (effectiveTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/)) {
+                            notamStart = new Date(effectiveTime);
+                        } else if (effectiveTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
+                            // UTC 없는 ISO 형식은 UTC로 처리
+                            notamStart = new Date(effectiveTime + 'Z');
+                        } else if (effectiveTime.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)) {
+                            // 2025-07-09 16:00 형식을 UTC로 처리
+                            notamStart = new Date(effectiveTime.replace(' ', 'T') + ':00Z');
+                        } else {
+                            // 기타 형식
+                            notamStart = new Date(effectiveTime);
+                        }
+                        
+                        if (expiryTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/)) {
+                            notamEnd = new Date(expiryTime);
+                        } else if (expiryTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
+                            notamEnd = new Date(expiryTime + 'Z');
+                        } else if (expiryTime.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)) {
+                            notamEnd = new Date(expiryTime.replace(' ', 'T') + ':00Z');
+                        } else {
+                            notamEnd = new Date(expiryTime);
+                        }
+                        
+                        if (!isNaN(notamStart.getTime()) && !isNaN(notamEnd.getTime())) {
+                            // SmartNOTAMgemini_GCR 방식: 겹침 확인
+                            // 겹치는 조건: notamStart <= filterEnd && notamEnd >= filterStart
+                            const isOverlapping = notamStart <= filterEnd && notamEnd >= filterStart;
+                            isVisible = isOverlapping;
+                            
+                            console.log(`NOTAM ${index + 1} 시간 분석 (로컬):`, {
+                                notamStart: notamStart.toLocaleString(),
+                                notamEnd: notamEnd.toLocaleString(),
+                                filterStart: filterStart.toLocaleString(),
+                                filterEnd: filterEnd.toLocaleString(),
+                                isOverlapping: isOverlapping,
+                                visible: isVisible
+                            });
+                        } else {
+                            console.warn(`NOTAM ${index + 1} 시간 파싱 실패:`, {
+                                effectiveTime,
+                                expiryTime,
+                                notamStart: isNaN(notamStart.getTime()) ? 'Invalid' : notamStart.toISOString(),
+                                notamEnd: isNaN(notamEnd.getTime()) ? 'Invalid' : notamEnd.toISOString()
+                            });
+                            isVisible = true;  // 파싱 실패시 표시
+                        }
+                    } catch (e) {
+                        // 파싱 오류 시 기본적으로 표시
+                        console.warn('시간 파싱 오류:', e, 'effectiveTime:', effectiveTime, 'expiryTime:', expiryTime);
+                        isVisible = true;
+                    }
+                } else {
+                    console.log(`NOTAM ${index + 1}: 시간 정보 부족 또는 UFN`, { effectiveTime, expiryTime });
+                }
+
+                // 개별 NOTAM 카드 표시/숨김
+                if (isVisible) {
+                    item.style.display = 'block';
+                    item.querySelector('.notam-status').textContent = '활성';
+                    item.querySelector('.notam-status').className = 'badge bg-success float-end notam-status';
+                    visibleCount++;
+                } else {
+                    item.style.display = 'none';
+                }
+                
+                // 통합 탭 섹션의 해당 NOTAM 항목들도 필터링
+                const notamIndex = index + 1;
+                const summaryItems = document.querySelectorAll(`[data-notam-index="${notamIndex}"]`);
+                summaryItems.forEach(summaryItem => {
+                    summaryItem.style.display = isVisible ? 'block' : 'none';
+                });
+            });
+
+            document.getElementById('filterStatus').textContent = 
+                `필터링 결과: ${visibleCount}개 NOTAM이 시간 범위에 포함됨 (전체: ${totalNotams}개)`;
+            
+            // 통합 탭 상태 업데이트
+            document.getElementById('summaryFilterStatus').textContent = 
+                `시간 필터링 활성: ${visibleCount}개 NOTAM만 표시 중`;
+        }
+
+        function showAllNotams() {
+            const notamItems = document.querySelectorAll('.notam-item');
+            notamItems.forEach((item, index) => {
+                item.style.display = 'block';
+                item.querySelector('.notam-status').textContent = '표시됨';
+                item.querySelector('.notam-status').className = 'badge bg-info float-end notam-status';
+                
+                // 통합 탭 섹션의 모든 NOTAM 항목도 표시
+                const notamIndex = index + 1;
+                const summaryItems = document.querySelectorAll(`[data-notam-index="${notamIndex}"]`);
+                summaryItems.forEach(summaryItem => {
+                    summaryItem.style.display = 'block';
+                });
+            });
+
+            document.getElementById('filterStatus').textContent = 
+                `전체 NOTAM: ${totalNotams}개 (시간 필터링 비활성화 - 모든 NOTAM 표시)`;
+            
+            // 통합 탭 상태 업데이트
+            document.getElementById('summaryFilterStatus').textContent = 
+                `시간 필터링 비활성: 전체 ${totalNotams}개 NOTAM 표시 중`;
+        }
+
+        // 페이지 로드 시 NOTAM 데이터 확인
+        document.addEventListener('DOMContentLoaded', function() {
+            // 서버에서 전달된 공항 코드 사용
+            const airportCodes = [
+                {% for notam in notams %}
+                    {% if notam.airport_code %}'{{ notam.airport_code }}',{% endif %}
+                {% endfor %}
+            ];
+            
+            // 중복 제거 및 정렬
+            const uniqueAirports = [...new Set(airportCodes)].sort();
+            console.log('추출된 공항 코드:', uniqueAirports);
+            
+            // 공항 필터 초기화
+            if (uniqueAirports.length > 0) {
+                renderAirportFilter(uniqueAirports);
+            } else {
+                document.getElementById('airportFilter').innerHTML = 
+                    '<div class="text-muted">사용 가능한 공항이 없습니다.</div>';
+            }
+            
+            // 디버깅: 모든 NOTAM 아이템의 시간 데이터 출력
+            const notamItems = document.querySelectorAll('.notam-item');
+            console.log('=== NOTAM 시간 데이터 디버깅 ===');
+            notamItems.forEach((item, index) => {
+                console.log(`NOTAM ${index + 1}:`, {
+                    effectiveTime: item.dataset.effectiveTime,
+                    expiryTime: item.dataset.expiryTime,
+                    rawHTML: item.outerHTML.substring(0, 200) + '...'
+                });
+            });
+            console.log('=== 디버깅 완료 ===');
+            
+            // 시간 필터링 스위치 상태에 따라 초기화
+            const timeFilterSwitch = document.getElementById('timeFilterSwitch');
+            const timeFilterCard = document.querySelector('.time-filter-controls .card');
+            const applyBtn = document.getElementById('applyFilterBtn');
+            
+            if (timeFilterSwitch.checked) {
+                // 필터링이 켜져 있으면 카드 활성화
+                timeFilterCard.classList.remove('disabled');
+                timeFilterCard.style.opacity = '1';
+                applyBtn.disabled = false;
+                
+                document.getElementById('filterStatus').textContent = 
+                    `전체 NOTAM: ${totalNotams}개 (시간 필터 설정 후 '적용' 버튼을 클릭하세요)`;
+                document.getElementById('summaryFilterStatus').textContent = 
+                    `시간 범위를 설정하고 '적용' 버튼을 클릭하여 필터링하세요`;
+                
+                // 모든 NOTAM을 초기 상태로 표시
+                const notamItems = document.querySelectorAll('.notam-item');
+                notamItems.forEach((item, index) => {
+                    item.style.display = 'block';
+                    item.querySelector('.notam-status').textContent = '대기중';
+                    item.querySelector('.notam-status').className = 'badge bg-warning float-end notam-status';
+                    
+                    // 통합 탭 섹션도 표시
+                    const notamIndex = index + 1;
+                    const summaryItems = document.querySelectorAll(`[data-notam-index="${notamIndex}"]`);
+                    summaryItems.forEach(summaryItem => {
+                        summaryItem.style.display = 'block';
+                    });
+                });
+            } else {
+                // 필터링이 꺼져 있으면 카드 비활성화 스타일
+                timeFilterCard.classList.add('disabled');
+                timeFilterCard.style.opacity = '0.6';
+                applyBtn.disabled = true;
+                
+                // 모든 NOTAM 표시
+                showAllNotams();
+            }
+        });
+
+        // 공항 필터 UI 렌더링
+        function renderAirportFilter(airports) {
+            const airportFilterContainer = document.getElementById('airportFilter');
+            
+            const checkboxes = airports.map(airport => `
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input airport-checkbox" type="checkbox" 
+                           id="airport_${airport}" value="${airport}" checked>
+                    <label class="form-check-label" for="airport_${airport}">
+                        ${airport}
+                    </label>
+                </div>
+            `).join('');
+
+            airportFilterContainer.innerHTML = checkboxes;
+
+            // 공항 필터 이벤트 리스너 추가
+            setupAirportFilterListeners();
+        }
+
+        // 공항 필터 이벤트 리스너 설정
+        function setupAirportFilterListeners() {
+            // 전체 선택/해제 버튼
+            document.getElementById('selectAllAirports').addEventListener('click', function() {
+                const checkboxes = document.querySelectorAll('.airport-checkbox');
+                checkboxes.forEach(checkbox => checkbox.checked = true);
+            });
+
+            document.getElementById('clearAllAirports').addEventListener('click', function() {
+                const checkboxes = document.querySelectorAll('.airport-checkbox');
+                checkboxes.forEach(checkbox => checkbox.checked = false);
+            });
+
+            // 필터 적용 버튼
+            document.getElementById('applyAirportFilter').addEventListener('click', function() {
+                applyAirportFilter();
+            });
+        }
+
+        // 공항 필터 적용 함수
+        function applyAirportFilter() {
+            const selectedAirports = Array.from(document.querySelectorAll('.airport-checkbox:checked'))
+                .map(checkbox => checkbox.value);
+
+            console.log('선택된 공항:', selectedAirports);
+
+            const notamItems = document.querySelectorAll('.notam-item');
+            const notamSummaryItems = document.querySelectorAll('.notam-summary-item');
+            let visibleCount = 0;
+
+            // 개별 NOTAM 카드 필터링
+            notamItems.forEach((item, index) => {
+                // NOTAM에서 공항 코드 추출
+                const airportBadges = item.querySelectorAll('.badge.bg-primary');
+                const notamAirports = Array.from(airportBadges).map(badge => badge.textContent.trim());
+
+                console.log(`NOTAM ${index + 1} 공항:`, notamAirports);
+
+                // 선택된 공항과 일치하는지 확인
+                const hasMatchingAirport = notamAirports.some(airport => selectedAirports.includes(airport));
+
+                if (selectedAirports.length === 0 || hasMatchingAirport) {
+                    item.style.display = 'block';
+                    visibleCount++;
+                    
+                    // 상태 업데이트
+                    const statusBadge = item.querySelector('.notam-status');
+                    statusBadge.textContent = '표시됨';
+                    statusBadge.className = 'badge bg-success float-end notam-status';
+                } else {
+                    item.style.display = 'none';
+                    
+                    // 상태 업데이트
+                    const statusBadge = item.querySelector('.notam-status');
+                    statusBadge.textContent = '필터됨';
+                    statusBadge.className = 'badge bg-secondary float-end notam-status';
+                }
+            });
+
+            // 전체 번역/요약 탭의 NOTAM 항목 필터링
+            notamSummaryItems.forEach((item, index) => {
+                const airportCode = item.getAttribute('data-airport-code');
+                
+                console.log(`Summary NOTAM ${index + 1} 공항:`, airportCode);
+
+                if (selectedAirports.length === 0 || selectedAirports.includes(airportCode)) {
+                    item.style.display = 'block';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+
+            // 상태 업데이트
+            const filterStatus = document.getElementById('filterStatus');
+            if (selectedAirports.length === 0) {
+                filterStatus.innerHTML = `전체 NOTAM: ${totalNotams}개 (공항 필터 없음 - 모든 NOTAM 표시)`;
+            } else {
+                filterStatus.innerHTML = `
+                    필터링 결과: ${visibleCount}개 NOTAM이 선택된 공항에 포함됨 (전체: ${totalNotams}개)<br>
+                    <strong>선택된 공항:</strong> ${selectedAirports.map(airport => 
+                        `<span class="badge bg-primary me-1">${airport}</span>`
+                    ).join('')}
+                `;
+            }
+
+            // 전체 번역/요약 탭 상태 업데이트
+            const summaryFilterStatus = document.getElementById('summaryFilterStatus');
+            if (selectedAirports.length === 0) {
+                summaryFilterStatus.textContent = '모든 공항의 NOTAM이 표시됩니다.';
+            } else {
+                const visibleSummaryCount = document.querySelectorAll('.notam-summary-item[style*="display: block"], .notam-summary-item:not([style*="display: none"])').length;
+                summaryFilterStatus.innerHTML = `
+                    선택된 공항: ${selectedAirports.map(airport => 
+                        `<span class="badge bg-primary me-1">${airport}</span>`
+                    ).join('')} - ${visibleSummaryCount}개 NOTAM 표시 중
+                `;
+            }
+
+            console.log(`공항 필터 적용 완료: ${visibleCount}개 NOTAM 표시`);
+        }
+    </script>
+</body>
+</html>

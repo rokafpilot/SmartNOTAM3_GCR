@@ -5,6 +5,7 @@ Smart NOTAM3 - 시간 필터링과 로컬시간 변환이 적용된 NOTAM 처리
 from flask import Flask, request, render_template, jsonify, redirect, url_for, flash
 from werkzeug.utils import secure_filename
 import os
+import subprocess
 import logging
 from datetime import datetime
 import json
@@ -16,7 +17,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 from src.pdf_converter import PDFConverter
 from src.notam_filter import NOTAMFilter  
 from src.notam_translator import NOTAMTranslator
-from src.optimized_translator import OptimizedNOTAMTranslator
+from src.hybrid_translator import HybridNOTAMTranslator
+from src.parallel_translator import ParallelHybridNOTAMTranslator
 from dotenv import load_dotenv
 
 # 환경 변수 로드
@@ -25,6 +27,13 @@ load_dotenv()
 # 로깅 설정
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# pdfminer의 DEBUG 로그 억제로 성능 향상
+logging.getLogger('pdfminer').setLevel(logging.WARNING)
+logging.getLogger('pdfminer.psparser').setLevel(logging.WARNING)
+logging.getLogger('pdfminer.pdfinterp').setLevel(logging.WARNING)
+logging.getLogger('pdfminer.pdfdocument').setLevel(logging.WARNING)
+logging.getLogger('pdfminer.pdfpage').setLevel(logging.WARNING)
 
 # Flask 앱 설정
 app = Flask(__name__)
@@ -47,7 +56,8 @@ os.makedirs(TEMP_FOLDER, exist_ok=True)
 pdf_converter = PDFConverter()
 notam_filter = NOTAMFilter()
 notam_translator = NOTAMTranslator()
-optimized_translator = OptimizedNOTAMTranslator(max_workers=5, batch_size=10)
+hybrid_translator = HybridNOTAMTranslator()
+parallel_translator = ParallelHybridNOTAMTranslator()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -58,6 +68,10 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    # 전체 처리 시간 측정 시작
+    total_start_time = datetime.now()
+    processing_times = {}
+    
     try:
         if 'file' not in request.files:
             flash('파일이 선택되지 않았습니다.')
@@ -69,32 +83,45 @@ def upload_file():
             return redirect(request.url)
         
         if file and file.filename and allowed_file(file.filename):
-            # 파일 저장
+            # 파일 저장 시간 측정
+            file_save_start = datetime.now()
             filename = secure_filename(file.filename)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"{timestamp}_{filename}"
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
+            processing_times['file_save'] = (datetime.now() - file_save_start).total_seconds()
             
-            # PDF 텍스트 변환
+            # PDF 텍스트 변환 시간 측정
+            pdf_conversion_start = datetime.now()
             logger.info(f"PDF 변환 시작: {filepath}")
             text = pdf_converter.convert_pdf_to_text(filepath)
+            processing_times['pdf_conversion'] = (datetime.now() - pdf_conversion_start).total_seconds()
+            
+            logger.info(f"PDF 텍스트 변환 완료: {len(text)} 문자 ({processing_times['pdf_conversion']:.2f}초)")
+            logger.info(f"텍스트 내용 미리보기: {text[:200]}...")
             
             if not text.strip():
+                logger.error("PDF에서 추출된 텍스트가 비어있습니다.")
                 flash('PDF에서 텍스트를 추출할 수 없습니다.')
                 return redirect(url_for('index'))
             
-            # NOTAM 필터링
+            # NOTAM 필터링 시간 측정
+            filtering_start = datetime.now()
             logger.info("NOTAM 필터링 시작")
             notams = notam_filter.filter_korean_air_notams(text)
+            processing_times['notam_filtering'] = (datetime.now() - filtering_start).total_seconds()
+            logger.info(f"NOTAM 필터링 완료: {len(notams)}개 ({processing_times['notam_filtering']:.2f}초)")
             
             # 공항 코드 추출 (필터링 전)
             all_airports = set()
             for notam in notams:
-                airport_codes = notam.get('airport_codes', [])
-                all_airports.update(airport_codes)
+                airport_code = notam.get('airport_code', '')
+                if airport_code:
+                    all_airports.add(airport_code)
             
-            # 공항 필터링 처리 (선택사항)
+            # 공항 필터링 처리 시간 측정 (선택사항)
+            airport_filter_start = datetime.now()
             airport_filter_data = request.form.get('airport_filter')
             if airport_filter_data:
                 try:
@@ -103,24 +130,31 @@ def upload_file():
                     
                     if selected_airports:
                         logger.info(f"공항 필터 적용: {selected_airports}")
-                        # 선택된 공항과 관련된 NOTAM만 필터링
+                        # 선택된 공항과 관련된 NOTAM만 필터링 (원본 순서 유지)
                         filtered_notams = []
-                        for notam in notams:
-                            notam_airports = notam.get('airport_codes', [])
-                            # 하나라도 선택된 공항과 일치하면 포함
-                            if any(airport in selected_airports for airport in notam_airports):
+                        for i, notam in enumerate(notams):
+                            notam_airport = notam.get('airport_code', '')
+                            # 선택된 공항과 일치하면 포함
+                            if notam_airport in selected_airports:
                                 filtered_notams.append(notam)
+                                logger.debug(f"공항 필터링: NOTAM {i+1} -> {notam_airport} {notam.get('notam_number', 'N/A')} 포함")
                         
                         notams = filtered_notams
-                        logger.info(f"공항 필터링 후 NOTAM 수: {len(notams)}개")
+                        logger.info(f"공항 필터링 후 NOTAM 수: {len(notams)}개 (원본 순서 유지)")
+                        
+                        # 필터링된 NOTAM 순서 로깅
+                        logger.info("=== 공항 필터링 후 NOTAM 순서 ===")
+                        for i, notam in enumerate(notams[:10], 1):  # 첫 10개만 로깅
+                            logger.info(f"필터링 후 {i}: {notam.get('airport_code', 'N/A')} {notam.get('notam_number', 'N/A')}")
                         
                 except Exception as e:
                     logger.error(f"공항 필터 파싱 오류: {str(e)}")
+            processing_times['airport_filtering'] = (datetime.now() - airport_filter_start).total_seconds()
             
-            # NOTAM 시간을 로컬 시간으로 변환
+            # NOTAM 시간을 로컬 시간으로 변환 시간 측정
+            time_conversion_start = datetime.now()
             for notam in notams:
-                airport_codes = notam.get('airport_codes', [])
-                airport_code = airport_codes[0] if airport_codes else 'RKSI'  # 기본값: 인천공항
+                airport_code = notam.get('airport_code', 'RKSI')  # 기본값: 인천공항
                 
                 effective_time = notam.get('effective_time', '')
                 expiry_time = notam.get('expiry_time', '')
@@ -128,39 +162,75 @@ def upload_file():
                 # 로컬 시간으로 변환된 시간 문자열 생성
                 if effective_time and expiry_time:
                     local_time_str = notam_filter.format_notam_time_with_local(
-                        effective_time, expiry_time, airport_code
+                        effective_time, expiry_time, airport_code, notam
                     )
                     notam['local_time_display'] = local_time_str
+            processing_times['time_conversion'] = (datetime.now() - time_conversion_start).total_seconds()
             
             if not notams:
                 flash('필터링된 NOTAM이 없습니다.')
                 return redirect(url_for('index'))
             
-            # NOTAM 번역 및 요약 (최적화된 배치 처리)
-            logger.info(f"최적화된 번역 시작: {len(notams)}개 NOTAM")
-            start_time = datetime.now()
+            # NOTAM 번역 및 요약 시간 측정 (병렬 번역기 사용)
+            translation_start = datetime.now()
+            logger.info(f"병렬 번역 시작: {len(notams)}개 NOTAM")
             
-            # 최적화된 번역기로 모든 NOTAM을 한 번에 처리
-            translated_notams = optimized_translator.process_notams_optimized(notams)
+            # 병렬 번역기로 모든 NOTAM을 처리
+            logger.info(f"번역 전 NOTAM 개수: {len(notams)}")
             
-            end_time = datetime.now()
-            processing_time = (end_time - start_time).total_seconds()
+            # 번역 전 NOTAM 데이터 샘플 로깅
+            for i, notam in enumerate(notams[:3]):  # 처음 3개만 로깅
+                logger.info(f"NOTAM {i+1} 번역 전: {notam.get('notam_number', 'N/A')} - {notam.get('description', '')[:100]}...")
             
-            logger.info(f"최적화된 번역 완료: {len(translated_notams)}개 NOTAM, {processing_time:.2f}초")
-            logger.info(f"평균 처리 시간: {processing_time/len(translated_notams):.2f}초/NOTAM")
+            translated_notams = parallel_translator.process_notams_parallel(notams)
+            processing_times['translation'] = (datetime.now() - translation_start).total_seconds()
             
-            # 캐시 통계 로깅
-            cache_stats = optimized_translator.get_cache_stats()
-            logger.info(f"캐시 통계: {cache_stats}")
+            # 번역 후 결과 샘플 로깅
+            logger.info(f"번역 후 NOTAM 개수: {len(translated_notams)}")
+            for i, notam in enumerate(translated_notams[:3]):  # 처음 3개만 로깅
+                logger.info(f"NOTAM {i+1} 번역 후: {notam.get('notam_number', 'N/A')} - 타입: {notam.get('notam_type', 'N/A')} - 한국어: {notam.get('korean_translation', 'N/A')[:50]}...")
+            
+            logger.info(f"병렬 번역 완료: {len(translated_notams)}개 NOTAM, {processing_times['translation']:.2f}초")
+            logger.info(f"평균 처리 시간: {processing_times['translation']/len(translated_notams):.2f}초/NOTAM")
             
             # 결과를 원래 notams 리스트에 반영
             notams = translated_notams
             
-            # 템플릿에 공항 정보도 전달
+            # 전체 처리 시간 계산
+            total_processing_time = (datetime.now() - total_start_time).total_seconds()
+            processing_times['total'] = total_processing_time
+            
+            # 시간 측정 결과 로깅
+            logger.info("=== 처리 시간 요약 ===")
+            logger.info(f"파일 저장: {processing_times['file_save']:.2f}초")
+            logger.info(f"PDF 변환: {processing_times['pdf_conversion']:.2f}초")
+            logger.info(f"NOTAM 필터링: {processing_times['notam_filtering']:.2f}초")
+            logger.info(f"공항 필터링: {processing_times['airport_filtering']:.2f}초")
+            logger.info(f"시간 변환: {processing_times['time_conversion']:.2f}초")
+            logger.info(f"번역: {processing_times['translation']:.2f}초")
+            logger.info(f"전체 처리 시간: {processing_times['total']:.2f}초")
+            logger.info("==================")
+            
+            # 패키지별 공항 정보 생성
+            package_airports = {
+                'package1': ['RKSI', 'VVDN', 'VVTS', 'VVCR', 'SECY'],
+                'package2': ['RKSI', 'RKPC', 'ROAH', 'RJFF', 'RORS', 'RCTP', 'VHHH', 'ZJSY', 'VVNB', 'VVDN', 'VVTS'],
+                'package3': ['RKRR', 'RJJJ', 'RCAA', 'VHHK', 'ZJSA', 'VVHN', 'VVHM']
+            }
+            
+            # 실제 존재하는 공항만 필터링 (빈 리스트가 아닌 경우만 포함)
+            filtered_package_airports = {}
+            for package, airports in package_airports.items():
+                existing_airports = [airport for airport in airports if airport in all_airports]
+                if existing_airports:  # 공항이 하나라도 있으면 포함
+                    filtered_package_airports[package] = existing_airports
+            
+            # 템플릿에 공항 정보 전달
             return render_template('results.html', 
                                  notams=notams, 
                                  current_date=datetime.now().strftime('%Y-%m-%d'),
-                                 all_airports=sorted(list(all_airports)))
+                                 all_airports=sorted(list(all_airports)),
+                                 package_airports=filtered_package_airports)
         
         else:
             flash('허용되지 않는 파일 형식입니다. PDF 파일만 업로드 가능합니다.')
@@ -202,8 +272,8 @@ def extract_airports():
         
         try:
             logger.info("PDF 텍스트 변환 시작")
-            # PDF 텍스트 변환
-            text = pdf_converter.convert_pdf_to_text(temp_filepath)
+            # PDF 텍스트 변환 (임시 파일 저장 비활성화)
+            text = pdf_converter.convert_pdf_to_text(temp_filepath, save_temp=False)
             logger.info(f"PDF 텍스트 변환 완료: {len(text)} 문자")
             
             if not text.strip():
@@ -239,6 +309,17 @@ def extract_airports():
         logger.error(f"공항 추출 중 오류: {str(e)}")
         return jsonify({'error': f'공항 추출 중 오류가 발생했습니다: {str(e)}'}), 500
 
+@app.route('/google_maps')
+def google_maps():
+    """구글지도 페이지"""
+    return render_template('google_maps.html')
+
+@app.route('/health')
+def health():
+    """헬스 체크 엔드포인트"""
+    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+
 if __name__ == '__main__':
-    # 포트 5005에서 실행
-    app.run(debug=True, host='0.0.0.0', port=5005)
+    # Cloud Run에서는 PORT 환경변수를 사용, 로컬에서는 5005 사용
+    port = int(os.environ.get('PORT', 5005))
+    app.run(debug=True, host='0.0.0.0', port=port)

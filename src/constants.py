@@ -9,9 +9,9 @@ NO_TRANSLATE_TERMS = [
     "NOTAM", "NOTAMN", "NOTAMR", "NOTAMC", "TRIGGER NOTAM",
     "AIRAC", "AIP", "AIP SUP", "AIP AMDT",
     
-    # 공항 및 항공 관련 코드
-    "RKSS", "RKSI", "RKRR", "RKPC", "RKPK", "RKTU", "RKNY", "RKJJ",
-    "KLAX", "KSEA", "LFLN", "LFGN",
+    # # 공항 및 항공 관련 코드
+    # "RKSS", "RKSI", "RKRR", "RKPC", "RKPK", "RKTU", "RKNY", "RKJJ",
+    # "KLAX", "KSEA", "LFLN", "LFGN",
     
     # 항행 보조 시설
     "ILS", "VOR", "DME", "NDB", "ADF", "RNAV", "GPS", "RAIM",
@@ -19,7 +19,7 @@ NO_TRANSLATE_TERMS = [
     
     # 공항 시설
     "RWY", "TWY", "APRON", "TWR", "ATIS", "CTR", "FIR", "TMA",
-    "STAND", "STANDS", "PARKING", "GATE",
+    "STAND", "STANDS", "PARKING",
     
     # 단위 및 측정
     "UTC", "EST", "FT", "NM", "KM", "M", "MHZ", "KHZ",
@@ -28,20 +28,21 @@ NO_TRANSLATE_TERMS = [
     "ATC", "CNS", "MET", "VHF", "HF", "UHF", "RADAR", "TCAS",
     "GPWS", "EGPWS", "ACAS", "SID", "STAR", "IAP", "NPA",
     
+    # 항공기 제조사 및 시스템
+    "BOEING", "AIRBUS", "TERR", "OVRD", "OFF", "INHIB", "INHIBIT",
+    "EGPWS", "TERR-INHIB", "TERR - OVRD", "TERR - OFF",
+    
     # 날짜 및 시간 형식
     "SR", "SS", "SFC", "ASFC", "AMSL", "AGL",
     
     # 방향 및 위치
-    "N", "S", "E", "W", "NE", "NW", "SE", "SW",
-    "L", "R", "C", "LEFT", "RIGHT", "CENTER",
+    # "N", "S", "E", "W", "NE", "NW", "SE", "SW",
+    # "L", "R", "C", "LEFT", "RIGHT", "CENTER",
     
     # 상태 및 조건
-    "CLSD", "U/S", "AVBL", "ACT", "INOP", "WIP",
-    "TEMP", "PERM", "EST", "REF", "INFO",
-    
-    # 기타 약어
-    "FM", "TO", "BTN", "EXC", "DUE", "REF", "INFO",
-    "MAINT", "OPR", "SVC", "THR", "TIL", "UFN"
+    # "U/S", "AVBL", "ACT", "INOP",
+    # "TEMP", "PERM", "EST",
+
 ]
 
 # 기본 약어 사전
@@ -74,7 +75,8 @@ DEFAULT_ABBR_DICT = {
     "SVC": "service",
     "THR": "threshold",
     "TIL": "until",
-    "UFN": "until further notice"
+    "UFN": "until further notice",
+    "A/C": "aircraft"
 }
 
 # 색상 스타일 적용 용어 (위험/주의사항)
@@ -180,6 +182,38 @@ PRIORITY_KEYWORDS = [
     'EMERGENCY', 'CAUTION', 'RESTRICTED',
     'OUT OF SERVICE', 'UNSERVICEABLE',
     'GPS RAIM', 'SEVERE WEATHER'
+]
+
+# NOTAM 구분자 패턴들
+NOTAM_SEPARATOR_PATTERNS = [
+    # 기본 구분선 패턴
+    r'^-{3,}$',  # 3개 이상의 하이픈
+    r'^={3,}$',  # 3개 이상의 등호
+    r'^_{3,}$',  # 3개 이상의 언더스코어
+    r'^\*{3,}$',  # 3개 이상의 별표
+    r'^#{3,}$',  # 3개 이상의 해시
+    r'^\.{3,}$',  # 3개 이상의 점
+    
+    # 공백이 포함된 구분선 패턴
+    r'^[\s\-]{5,}$',  # 하이픈과 공백 조합
+    r'^[\s=]{5,}$',   # 등호와 공백 조합
+    r'^[\s_]{5,}$',   # 언더스코어와 공백 조합
+    r'^[\s\*]{5,}$',  # 별표와 공백 조합
+    r'^[\s#]{5,}$',   # 해시와 공백 조합
+    r'^[\s\.]{5,}$',  # 점과 공백 조합
+    
+    # 혼합 구분선 패턴
+    r'^[\-\=\_\*\#\.]{3,}$',  # 다양한 구분자 조합
+    
+    # NOTAM 관련 구분자 텍스트
+    r'^NOTAM\s+SEPARATOR$',
+    r'^NOTAM\s+DIVIDER$',
+    r'^NOTAM\s+BREAK$',
+    r'^END\s+OF\s+NOTAM$',
+    r'^NOTAM\s+END$',
+    
+    # 빈 줄이 아닌 구분자들 (공백만 있는 줄은 제외)
+    r'^[^\s].*[^\s]$',  # 시작과 끝에 공백이 아닌 문자가 있는 줄
 ]
 
 # 색상 스타일 적용 함수에서 사용할 HTML 태그

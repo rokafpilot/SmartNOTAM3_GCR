@@ -19,6 +19,7 @@ from src.notam_filter import NOTAMFilter
 from src.notam_translator import NOTAMTranslator
 from src.hybrid_translator import HybridNOTAMTranslator
 from src.parallel_translator import ParallelHybridNOTAMTranslator
+from src.integrated_translator import IntegratedNOTAMTranslator
 from dotenv import load_dotenv
 
 # 환경 변수 로드
@@ -58,6 +59,7 @@ notam_filter = NOTAMFilter()
 notam_translator = NOTAMTranslator()
 hybrid_translator = HybridNOTAMTranslator()
 parallel_translator = ParallelHybridNOTAMTranslator()
+integrated_translator = IntegratedNOTAMTranslator()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -182,7 +184,8 @@ def upload_file():
             for i, notam in enumerate(notams[:3]):  # 처음 3개만 로깅
                 logger.info(f"NOTAM {i+1} 번역 전: {notam.get('notam_number', 'N/A')} - {notam.get('description', '')[:100]}...")
             
-            translated_notams = parallel_translator.process_notams_parallel(notams)
+            # 통합 번역기 사용 (개별 처리로 변경)
+            translated_notams = integrated_translator.process_notams_individual(notams)
             processing_times['translation'] = (datetime.now() - translation_start).total_seconds()
             
             # 번역 후 결과 샘플 로깅
@@ -264,7 +267,7 @@ def extract_airports():
             return jsonify({'error': '유효하지 않은 파일입니다.'}), 400
         
         # 임시 파일 저장
-        filename = secure_filename(file.filename)
+        filename = secure_filename(file.filename or 'unknown.pdf')
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         temp_filename = f"temp_{timestamp}_{filename}"
         temp_filepath = os.path.join(app.config['TEMP_FOLDER'], temp_filename)

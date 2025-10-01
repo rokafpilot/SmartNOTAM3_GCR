@@ -1,337 +1,225 @@
-"""
-PDF to Text Converter Module
-대한항공 NOTAM PDF 파일을 텍스트로 변환하는 모듈
-참조: SmartNOTAMgemini_GCR/enroute/notam_all_in_one.py
-"""
-
-import PyPDF2
+import os
+import re
 import pdfplumber
 import logging
-import os
-import tempfile
-from typing import Optional, List
-import re
-from datetime import datetime
-from constants import NOTAM_START_PATTERN, KOREAN_AIR_KEYWORDS
+from typing import List, Dict, Any
 
 class PDFConverter:
-    """PDF 파일을 텍스트로 변환하는 클래스"""
+    """PDF를 텍스트로 변환하고 NOTAM을 분리하는 클래스"""
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+    
+    def _extract_text_from_pdf(self, pdf_path: str) -> str:
+        """PDF에서 텍스트 추출"""
+        all_text = ""
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    all_text += page_text + "\n"
+        return all_text
+    
+    def _detect_notam_type(self, text: str) -> str:
+        """NOTAM 유형 감지 (pdf_to_txt_auto.py 기반)"""
+        if 'KOREAN AIR NOTAM PACKAGE' in text.upper():
+            return 'package'
+        return 'airport'
+    
+    def _process_airport_notam(self, pdf_path: str, save_temp=True) -> str:
+        """공항 NOTAM 처리 (pdf_to_txt_test_airport.py 기반)"""
+        all_text = self._extract_text_from_pdf(pdf_path)
         
-    def convert_with_pypdf2(self, pdf_path: str) -> str:
-        """
-        PyPDF2를 사용하여 PDF를 텍스트로 변환
-        
-        Args:
-            pdf_path (str): PDF 파일 경로
+        def split_notams(text):
+            """NOTAM 분리 함수 (pdf_to_txt_test_airport.py 기반)"""
+            lines = text.split('\n')
+            notams = []
+            current_notam = []
             
-        Returns:
-            str: 변환된 텍스트
-        """
-        try:
-            text = ""
-            with open(pdf_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
+            # robust pattern: 날짜-날짜, 날짜-UFN, 날짜-PERM 모두 허용
+            # COAD 형식도 포함 (예: 27FEB25 00:00 - UFN KSEA COAD01/25)
+            notam_start_pattern = r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)(?:\s+[A-Z]{4}\s+COAD\d{2}/\d{2})?'
+            notam_id_pattern = r'^[A-Z]{4}(?:\s+[A-Z]+)*(?:\s+[A-Z]+)*\s+\d{1,4}/\d{2}$|^[A-Z]{4}\s+[A-Z]\d{4}/\d{2}$'
+            end_phrase_pattern = r'ANY CHANGE WILL BE NOTIFIED BY NOTAM\.'
+
+            found_first_notam = False
+            for line in lines:
+                if re.match(notam_start_pattern, line):
+                    found_first_notam = True
+                    if current_notam:
+                        notams.append('\n'.join(current_notam).strip())
+                        current_notam = []
+                if not found_first_notam:
+                    continue  # 첫 NOTAM 시작 전까지는 무시
+                if re.match(notam_start_pattern, line) or re.match(notam_id_pattern, line):
+                    if current_notam:
+                        notams.append('\n'.join(current_notam).strip())
+                        current_notam = []
+                current_notam.append(line)
+                if re.search(end_phrase_pattern, line):
+                    notams.append('\n'.join(current_notam).strip())
+                    current_notam = []
+            if current_notam:
+                notams.append('\n'.join(current_notam).strip())
+            return notams
+
+        def remove_unwanted_lines_from_notam(notam):
+            """불필요한 키워드가 포함된 줄 제거 (pdf_to_txt_test_airport.py 기반)"""
+            # COAD 형식은 보존하고, OCR 오류 패턴만 제거
+            unwanted_keywords = [
+                'â—R¼A MP', 'â—O¼B STRUCTION', 'â—G¼P S', 'â—R¼U NWAY', 'â—A¼PP ROACH', 'â—T¼A XIWAY',
+                'â—N¼A VAID', 'â—D¼E PARTURE', 'â—R¼U NWAY LIGHT', 'â—A¼IP', 'â—O¼T HER', 'â—A¼IR PORT'
+            ]
+            return '\n'.join([line for line in notam.split('\n') if not any(keyword in line for keyword in unwanted_keywords)])
+
+        split_notams_list = split_notams(all_text)
+        # 필터링을 NOTAM 분리 후에 적용 (pdf_to_txt_test_airport.py와 동일)
+        split_notams_list_cleaned = [remove_unwanted_lines_from_notam(notam) for notam in split_notams_list]
+
+        if save_temp:
+            base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+            out_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'temp', base_name + "_split.txt")
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            
+            with open(out_path, "w", encoding="utf-8") as f:
+                for notam in split_notams_list_cleaned:
+                    f.write(notam + "\n" + ("="*60) + "\n")
+
+        return '\n\n'.join(split_notams_list_cleaned) + '\n'
+    
+    def _process_package_notam(self, pdf_path: str, save_temp=True) -> str:
+        """패키지 NOTAM 처리 (pdf_to_txt_test_package.py 기반)"""
+        all_text = self._extract_text_from_pdf(pdf_path)
+
+        def merge_notam_lines(text):
+            """NOTAM 라인 병합 (pdf_to_txt_test_package.py 기반)"""
+            lines = text.split('\n')
+            # 삭제할 키워드 목록
+            unwanted_keywords = [
+                'â—R¼A MP', 'â—O¼B STRUCTION', 'â—G¼P S', 'â—R¼U NWAY', 'â—A¼PP ROACH', 'â—T¼A XIWAY',
+                'â—N¼A VAID', 'â—D¼E PARTURE', 'â—R¼U NWAY LIGHT', 'â—A¼IP', 'â—O¼T HER'
+            ]
+            # 불필요한 키워드가 포함된 줄 삭제
+            filtered_lines = [line for line in lines if not any(keyword in line for keyword in unwanted_keywords)]
+            merged_lines = []
+            i = 0
+            
+            # 더 정확한 패턴들
+            notam_id_pattern = r'^[A-Z]{4}(?:\s+[A-Z]+(?:\s+[A-Z]+)*)?\s+\d{1,3}/\d{2}$|^[A-Z]{4}\s+[A-Z]\d{4}/\d{2}$'
+            coad_pattern = r'^[A-Z]{4}\s+COAD\d{2}/\d{2}$'  # COAD 패턴 추가
+            date_line_pattern = r'^(?:\d+\.\s+)?\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-'  # "1. " 패턴 포함
+            
+            while i < len(filtered_lines):
+                line = filtered_lines[i].strip()
                 
-                for page_num in range(len(pdf_reader.pages)):
-                    page = pdf_reader.pages[page_num]
-                    text += page.extract_text() + "\n"
-                    
-            return text
-            
-        except Exception as e:
-            self.logger.error(f"PyPDF2 변환 중 오류 발생: {str(e)}")
-            return ""
-    
-    def convert_with_pdfplumber(self, pdf_path: str) -> str:
-        """
-        pdfplumber를 사용하여 PDF를 텍스트로 변환 (실제 NOTAM만 추출)
-        
-        Args:
-            pdf_path (str): PDF 파일 경로
-            
-        Returns:
-            str: 변환된 텍스트 (실제 NOTAM만)
-        """
-        try:
-            full_text = ""
-            with pdfplumber.open(pdf_path) as pdf:
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        full_text += page_text + "\n"
-            
-            # 실제 NOTAM만 추출
-            notam_only_text = self.extract_actual_notams(full_text)
-            
-            self.logger.info(f"PDF 변환 완료: 전체 {len(full_text)} 문자 -> NOTAM만 {len(notam_only_text)} 문자")
-            return notam_only_text
-            
-        except Exception as e:
-            self.logger.error(f"pdfplumber 변환 중 오류 발생: {str(e)}")
-            return ""
-    
-    def convert_pdf_to_text(self, pdf_path: str, method: str = "pdfplumber", save_temp: bool = True) -> str:
-        """
-        PDF를 텍스트로 변환 (메인 메서드)
-        
-        Args:
-            pdf_path (str): PDF 파일 경로
-            method (str): 변환 방법 ("pdfplumber" 또는 "pypdf2")
-            save_temp (bool): 임시 파일로 저장 여부
-            
-        Returns:
-            str: 변환된 텍스트
-        """
-        if method == "pdfplumber":
-            text = self.convert_with_pdfplumber(pdf_path)
-            # pdfplumber가 실패하면 PyPDF2로 시도
-            if not text.strip():
-                self.logger.info("pdfplumber 실패, PyPDF2로 재시도...")
-                text = self.convert_with_pypdf2(pdf_path)
-        else:
-            text = self.convert_with_pypdf2(pdf_path)
-            
-        # 텍스트 정리
-        cleaned_text = self.clean_text(text)
-        
-        # 임시 파일로 저장
-        if save_temp and cleaned_text.strip():
-            temp_file_path = self.save_to_temp_file(cleaned_text, pdf_path)
-            self.logger.info(f"변환된 텍스트를 임시 파일에 저장: {temp_file_path}")
-            
-        return cleaned_text
-    
-    def clean_text(self, text: str) -> str:
-        """
-        추출된 텍스트를 정리
-        
-        Args:
-            text (str): 원본 텍스트
-            
-        Returns:
-            str: 정리된 텍스트
-        """
-        # 불필요한 공백 제거
-        text = re.sub(r'\n\s*\n', '\n\n', text)
-        text = re.sub(r' +', ' ', text)
-        
-        # 특수 문자 정리
-        text = text.replace('\x00', '')
-        text = text.replace('\ufeff', '')
-        
-        return text.strip()
-    
-    def save_to_temp_file(self, text: str, original_pdf_path: str) -> str:
-        """
-        변환된 텍스트를 임시 파일로 저장
-        
-        Args:
-            text (str): 저장할 텍스트
-            original_pdf_path (str): 원본 PDF 파일 경로
-            
-        Returns:
-            str: 임시 파일 경로
-        """
-        try:
-            # 원본 파일명에서 확장자 제거
-            base_name = os.path.splitext(os.path.basename(original_pdf_path))[0]
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            
-            # temp 폴더 생성 (없으면)
-            temp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'temp')
-            os.makedirs(temp_dir, exist_ok=True)
-            
-            # 임시 파일 경로 생성
-            temp_filename = f"{base_name}_{timestamp}.txt"
-            temp_file_path = os.path.join(temp_dir, temp_filename)
-            
-            # 파일 저장
-            with open(temp_file_path, 'w', encoding='utf-8') as f:
-                f.write(text)
-            
-            self.logger.info(f"임시 파일 저장 완료: {temp_file_path}")
-            return temp_file_path
-            
-        except Exception as e:
-            self.logger.error(f"임시 파일 저장 중 오류 발생: {str(e)}")
-            return ""
-    
-    def extract_notam_sections(self, text: str) -> List[str]:
-        """
-        텍스트에서 NOTAM 섹션들을 추출
-        참조 파일의 split_notams 함수 기능 적용
-        
-        Args:
-            text (str): 전체 텍스트
-            
-        Returns:
-            List[str]: NOTAM 섹션들의 리스트
-        """
-        notam_sections = []
-        
-        # 참조 파일의 NOTAM 패턴 사용
-        notam_starts = [m.start() for m in re.finditer(NOTAM_START_PATTERN, text)]
-        
-        for i, start in enumerate(notam_starts):
-            end = notam_starts[i+1] if i+1 < len(notam_starts) else len(text)
-            notam_section = text[start:end].strip()
-            if notam_section:
-                notam_sections.append(notam_section)
-        
-        self.logger.info(f"총 {len(notam_sections)}개의 NOTAM 섹션 추출")
-        return notam_sections
-    
-    def extract_comment_notams(self, notam_list: List[str]) -> List[str]:
-        """
-        COMMENT가 포함된 NOTAM만 추출
-        참조 파일의 extract_comment_notams 함수 적용
-        
-        Args:
-            notam_list (List[str]): 전체 NOTAM 리스트
-            
-        Returns:
-            List[str]: COMMENT가 포함된 NOTAM 리스트
-        """
-        comment_notams = [notam for notam in notam_list if 'COMMENT' in notam]
-        self.logger.info(f"COMMENT 포함 NOTAM: {len(comment_notams)}개 발견")
-        return comment_notams
-    
-    def extract_actual_notams(self, text: str) -> str:
-        """
-        전체 텍스트에서 실제 NOTAM만 추출
-        
-        실제 NOTAM 시작점:
-        - â—R¼U NWAY, â—T¼A XIWAY 등 카테고리 헤더부터 시작 (특수문자 포함)
-        - 제외: â—C¼O MPANY ADVISORY 등 Company Advisory NOTAM
-        
-        Args:
-            text (str): 전체 PDF 텍스트
-            
-        Returns:
-            str: 실제 NOTAM만 포함된 텍스트
-        """
-        lines = text.split('\n')
-        
-        # 실제 NOTAM 카테고리 헤더들 (특수문자 패턴 + 일반 텍스트 패턴)
-        notam_category_patterns = [
-            r'â—R¼U NWAY|RUNWAY',        # RUNWAY
-            r'â—T¼A XIWAY|TAXIWAY',      # TAXIWAY  
-            r'â—R¼A MP|RAMP',            # RAMP
-            r'â—A¼PP ROACH|APPROACH',    # APPROACH
-            r'â—D¼E PARTURE|DEPARTURE',  # DEPARTURE
-            r'â—G¼P S|GPS',              # GPS
-            r'â—A¼IP|AIP',               # AIP
-            r'â—A¼IR PORT|AIRPORT',      # AIRPORT
-            r'â—O¼T HER|OTHER',          # OTHER
-            r'â—R¼U NWAY LIGHT|RUNWAY LIGHT'   # RUNWAY LIGHT
-        ]
-        
-        # 제외할 패턴들 (Company Advisory 등)
-        exclude_patterns = [
-            r'â—C¼O MPANY ADVISORY|COMPANY ADVISORY',
-            r'â—C¼O MPANY MINIMA|COMPANY MINIMA',
-            r'â—D¼E PARTURE AIRPORT TECHNICAL INFORMATION|DEPARTURE AIRPORT TECHNICAL INFORMATION'
-        ]
-        
-        # 첫 번째 NOTAM 카테고리 헤더 찾기
-        first_notam_line = -1
-        
-        for i, line in enumerate(lines):
-            line_stripped = line.strip()
-            
-            # 제외 패턴 체크
-            is_excluded = False
-            for exclude_pattern in exclude_patterns:
-                if exclude_pattern in line_stripped:
-                    is_excluded = True
-                    break
-            
-            if is_excluded:
-                continue
-            
-            # NOTAM 카테고리 헤더 찾기
-            for pattern in notam_category_patterns:
-                if pattern in line_stripped:
-                    first_notam_line = i
-                    self.logger.info(f"첫 번째 NOTAM 카테고리 발견 (라인 {i}): {line_stripped}")
-                    break
-            
-            if first_notam_line != -1:
-                break
-        
-        if first_notam_line == -1:
-            self.logger.warning("NOTAM 카테고리 헤더를 찾을 수 없음")
-            return text  # 원본 반환
-        
-        # 첫 번째 NOTAM 카테고리부터 끝까지 추출
-        notam_text = '\n'.join(lines[first_notam_line:])
-        
-        # Company Advisory 섹션들 제거
-        for exclude_pattern in exclude_patterns:
-            # 각 패턴부터 다음 NOTAM 카테고리까지 제거
-            pattern_with_content = exclude_pattern + r'.*?(?=' + '|'.join(notam_category_patterns) + r'|$)'
-            notam_text = re.sub(pattern_with_content, '', notam_text, flags=re.DOTALL | re.MULTILINE)
-        
-        # COAD (Company Advisory) NOTAM ID 패턴도 제거
-        coad_pattern = r'COAD\d+/\d+.*?(?=' + '|'.join(notam_category_patterns) + r'|$)'
-        notam_text = re.sub(coad_pattern, '', notam_text, flags=re.DOTALL | re.MULTILINE)
-        
-        result_text = notam_text.strip()
-        
-        self.logger.info(f"실제 NOTAM 추출 완료: {len(text)} -> {len(result_text)} 문자 ({((len(text) - len(result_text)) / len(text) * 100):.1f}% 감소)")
-        return result_text
-    
-    def get_temp_files(self) -> List[str]:
-        """
-        생성된 임시 파일들의 목록을 반환
-        
-        Returns:
-            List[str]: 임시 파일 경로들의 리스트
-        """
-        try:
-            temp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'temp')
-            if os.path.exists(temp_dir):
-                temp_files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) 
-                            if f.endswith('.txt')]
-                return sorted(temp_files, key=os.path.getmtime, reverse=True)
-            return []
-        except Exception as e:
-            self.logger.error(f"임시 파일 목록 조회 중 오류: {str(e)}")
-            return []
-    
-    def cleanup_temp_files(self, keep_latest: int = 5) -> None:
-        """
-        오래된 임시 파일들을 정리
-        
-        Args:
-            keep_latest (int): 유지할 최신 파일 개수
-        """
-        try:
-            temp_files = self.get_temp_files()
-            if len(temp_files) > keep_latest:
-                files_to_delete = temp_files[keep_latest:]
-                for file_path in files_to_delete:
-                    os.remove(file_path)
-                    self.logger.info(f"임시 파일 삭제: {file_path}")
-        except Exception as e:
-            self.logger.error(f"임시 파일 정리 중 오류: {str(e)}")
+                # COAD NOTAM ID 패턴 체크
+                if re.match(coad_pattern, line):
+                    # 다음 줄이 날짜 패턴이면 합침
+                    if i + 1 < len(filtered_lines) and re.match(date_line_pattern, filtered_lines[i+1].strip()):
+                        next_line = filtered_lines[i+1].strip()
+                        # "1. " 같은 번호 접두사 제거
+                        cleaned_date_line = re.sub(r'^\d+\.\s+', '', next_line)
+                        merged_lines.append(f"{cleaned_date_line} {line}")
+                        i += 2
+                        continue
+                
+                # 일반 NOTAM ID 패턴 체크
+                elif re.match(notam_id_pattern, line):
+                    # 다음 줄이 날짜 패턴이면 합침
+                    if i + 1 < len(filtered_lines) and re.match(date_line_pattern, filtered_lines[i+1].strip()):
+                        next_line = filtered_lines[i+1].strip()
+                        # "1. " 같은 번호 접두사 제거
+                        cleaned_date_line = re.sub(r'^\d+\.\s+', '', next_line)
+                        merged_lines.append(f"{cleaned_date_line} {line}")
+                        i += 2
+                        continue
+                
+                merged_lines.append(line)
+                i += 1
+            return '\n'.join(merged_lines)
 
+        merged_text = merge_notam_lines(all_text)
 
-if __name__ == "__main__":
-    # 테스트 코드
-    converter = PDFConverter()
+        def split_notams(text):
+            """NOTAM 분리 함수 (pdf_to_txt_test_package.py 기반)"""
+            lines = text.split('\n')
+            notams = []
+            current_notam = []
+            # 패턴 정의
+            notam_start_pattern = r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-'
+            section_start_pattern = r'^\[.*\]'
+            notam_id_pattern = r'^[A-Z]{4}(?:\s+[A-Z]+)?\s*\d{1,3}/\d{2}$|^[A-Z]{4}\s+[A-Z]\d{4}/\d{2}$|^[A-Z]{4}\s+COAD\d{2}/\d{2}$'
+            end_phrase_pattern = r'ANY CHANGE WILL BE NOTIFIED BY NOTAM\.'
+            # COAD 항목 분리를 위한 패턴 (예: "1. 20FEB25 00:00 - UFN RKSI COAD01/25")
+            coad_item_pattern = r'^\d+\.\s+\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-.*COAD\d{2}/\d{2}'
+
+            for line in lines:
+                # 다음 NOTAM 시작, 섹션 시작, NOTAM ID 등장, COAD 항목 시작 시 끊기
+                if (re.match(notam_start_pattern, line) or 
+                    re.match(section_start_pattern, line) or 
+                    re.match(notam_id_pattern, line) or
+                    re.match(coad_item_pattern, line)):
+                    if current_notam:
+                        notams.append('\n'.join(current_notam).strip())
+                        current_notam = []
+                current_notam.append(line)
+                # 끝 문구 등장 시 강제 끊기
+                if re.search(end_phrase_pattern, line):
+                    notams.append('\n'.join(current_notam).strip())
+                    current_notam = []
+            if current_notam:
+                notams.append('\n'.join(current_notam).strip())
+            return notams
+
+        split_notams_list = split_notams(merged_text)
+        # 분리된 NOTAM에서 불필요한 키워드 줄 제거
+        unwanted_keywords = [
+            'â—R¼A MP', 'â—O¼B STRUCTION', 'â—G¼P S', 'â—R¼U NWAY', 'â—A¼PP ROACH', 'â—T¼A XIWAY',
+            'â—N¼A VAID', 'â—D¼E PARTURE', 'â—R¼U NWAY LIGHT', 'â—A¼IP', 'â—O¼T HER', 'â—A¼IR PORT'
+        ]
+        def remove_unwanted_lines_from_notam(notam):
+            return '\n'.join([line for line in notam.split('\n') if not any(keyword in line for keyword in unwanted_keywords)])
+        split_notams_list_cleaned = [remove_unwanted_lines_from_notam(notam) for notam in split_notams_list]
+
+        if save_temp:
+            base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+            out_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'temp', base_name + "_split.txt")
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            
+            with open(out_path, "w", encoding="utf-8") as f:
+                for notam in split_notams_list_cleaned:
+                    f.write(notam + "\n" + ("="*60) + "\n")
+
+        return '\n\n'.join(split_notams_list_cleaned) + '\n'
     
-    # 예시 사용법
-    # text = converter.convert_pdf_to_text("sample_notam.pdf", save_temp=True)
-    # print(f"변환된 텍스트 길이: {len(text)} 문자")
-    # print(text[:500])  # 첫 500자 출력
-    
-    # 임시 파일 목록 확인
-    # temp_files = converter.get_temp_files()
-    # print(f"임시 파일 개수: {len(temp_files)}")
-    
-    # 오래된 임시 파일 정리
-    # converter.cleanup_temp_files(keep_latest=3)
+    def convert_pdf_to_text(self, pdf_path: str, save_temp=True) -> str:
+        """
+        PDF 파일을 텍스트로 변환하고, 유형을 자동 감지하여 적절한 처리 적용
+        """
+        try:
+            self.logger.info(f"PDF 파일에서 텍스트 추출 시작: {pdf_path}")
+            all_text = self._extract_text_from_pdf(pdf_path)
+            self.logger.info(f"원본 텍스트 추출 완료: {len(all_text)} 문자")
+            
+            if not all_text.strip():
+                self.logger.warning("추출된 텍스트가 비어있습니다.")
+                return ""
+            
+            notam_type = self._detect_notam_type(all_text)
+            self.logger.info(f"NOTAM 유형 감지: {notam_type}")
+            
+            if notam_type == 'package':
+                self.logger.info("패키지 NOTAM 처리 시작")
+                result = self._process_package_notam(pdf_path, save_temp=save_temp)
+            else:
+                self.logger.info("공항 NOTAM 처리 시작")
+                result = self._process_airport_notam(pdf_path, save_temp=save_temp)
+            
+            self.logger.info(f"NOTAM 처리 완료: {len(result)} 문자")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"PDF 변환 중 오류 발생: {str(e)}")
+            import traceback
+            self.logger.error(f"상세 오류: {traceback.format_exc()}")
+            raise Exception(f"PDF 변환 중 오류가 발생했습니다: {str(e)}")

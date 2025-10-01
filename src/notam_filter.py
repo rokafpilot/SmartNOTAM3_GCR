@@ -5,6 +5,10 @@ import re
 from datetime import datetime, timedelta
 import json
 import csv
+import logging
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from constants import NO_TRANSLATE_TERMS, DEFAULT_ABBR_DICT
 from typing import Dict, List, Optional
 
@@ -25,25 +29,26 @@ RED_STYLE_TERMS = [
     'closed', 'close', 'closing','obstacle','obstacles','obstacle area','obstruction','obstructions',
     'restricted','prohibited','severe','severe weather','volcanic ash','volcanic ash cloud',
     'out of service', 'unserviceable', 'not available','not authorized',
-    'caution','cautious',
+    'caution','cautious','cautionary',
     'hazard','hazardous','hazardous weather','hazardous materials',
     'emergency','emergency landing','emergency landing procedure',
     '장애물', '장애물 구역', '장애물 설치', '장애물 설치됨',
     '사용 불가', '운용 중단', '제한됨', '폐쇄됨',
     '제한', '폐쇄', '중단', '불가능', '불가',
     '긴급', '긴급 착륙', '긴급 착륙 절차',
-    '경보', '경보 발생', '경보 해제',
+    '경보', '경보 발생', '경보 해제', '오경보',
     '주의', '주의 요구', '주의 요구 사항',
     '크레인', 'crane', 'cranes',
     'GPS RAIM',  # GPS RAIM을 하나의 단어로 처리
     'Non-Precision Approach', 'non-precision approach',
     '포장 공사', 'pavement construction',
- ]
+]
 
 BLUE_STYLE_PATTERNS = [
     r'\bDVOR\b',  # DVOR
     r'\bAPRON\b',  # APRON
     r'\bANTI-ICING\b',  # ANTI-ICING
+    r'\bPAINTING\b',  # PAINTING
     r'\bDE-ICING\b',  # DE-ICING
     r'\bSTAND\s+NUMBER\s+\d+\b',  # STAND NUMBER + 숫자 (예: STAND NUMBER 711)
     r'\bSTAND\s+\d+\b',  # STAND + 숫자 (예: STAND 711)
@@ -112,9 +117,11 @@ def apply_color_styles(text):
     
     # 활주로 및 유도로 패턴 처리
     rwy_twy_patterns = [
-        (r'(?:^|\s)(RWY\s*\d{2}[LRC]?(?:/\d{2}[LRC]?)?)', 'blue'),  # RWY 15L/33R
-        (r'(?:^|\s)(TWY\s*[A-Z](?:\s+AND\s+[A-Z])*)', 'blue'),  # TWY D, TWY D AND E
-        (r'(?:^|\s)(TWY\s*[A-Z]\d+)', 'blue'),  # TWY D1
+        (r'\b(RWY\s*\d{2}[LRC]?(?:/\d{2}[LRC]?)?)\b', 'blue'),  # RWY 15L/33R
+        (r'\b(RWY\s*\|)\b', 'blue'),  # RWY |
+        (r'\b(RWY)\b', 'blue'),  # RWY 단독
+        (r'\b(TWY\s*[A-Z](?:\s+AND\s+[A-Z])*)\b', 'blue'),  # TWY D, TWY D AND E
+        (r'\b(TWY\s*[A-Z]\d+)\b', 'blue'),  # TWY D1
     ]
     
     for pattern, color in rwy_twy_patterns:
@@ -160,6 +167,9 @@ def translate_notam(text):
         }
     except Exception as e:
         print(f"번역 수행 중 오류 발생: {str(e)}")
+        print(f"오류 타입: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
         return {
             'english_translation': 'Translation failed',
             'korean_translation': '번역 실패',
@@ -209,7 +219,44 @@ def postprocess_translation(translated_text):
         if term not in ["AIRAC AIP SUP", "UTC"]:  # 이미 처리한 항목 제외
             translated_text = translated_text.replace(term.replace(' ', '_'), term)
     
-    return translated_text
+    # 불필요한 번역 내용 제거
+    unwanted_translation_patterns = [
+        r'공간\s*-->\s*\*\*번역:\*\*.*?이건 필요없는 말이야\.\.\.',
+        r'공간\s*-->\s*\*\*번역:\*\*.*?이건 필요없는 말이야',
+        r'공간\s*-->\s*.*?이건 필요없는 말이야\.\.\.',
+        r'공간\s*-->\s*.*?이건 필요없는 말이야',
+        r'\*\*번역:\*\*.*?이건 필요없는 말이야\.\.\.',
+        r'\*\*번역:\*\*.*?이건 필요없는 말이야',
+        r'이건 필요없는 말이야\.\.\.',
+        r'이건 필요없는 말이야',
+        # 기타 불필요한 패턴들 - 더 정확한 패턴
+        r'번역:\s*[^가-힣]*$',  # "번역:" 뒤에 한글이 아닌 내용
+        r'번역\s*:\s*[^가-힣]*$',
+        r'^\s*번역\s*$',
+        r'^\s*번역:\s*$',
+        r'^\s*\*\*번역:\*\*\s*$',
+        r'^\s*공간\s*-->\s*$',
+        r'^\s*공간\s*$',
+        # "번역:" 뒤에 특정 패턴들
+        r'번역:\s*이것은.*?입니다\.',
+        r'번역:\s*테스트.*?입니다\.',
+        r'번역:\s*[가-힣]*\s*테스트',
+    ]
+    
+    import re
+    for pattern in unwanted_translation_patterns:
+        translated_text = re.sub(pattern, '', translated_text, flags=re.MULTILINE | re.DOTALL)
+    
+    # 빈 줄 정리
+    lines = translated_text.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        line = line.strip()
+        # "번역 실패"는 유지하고, 다른 불필요한 "번역:" 시작 라인만 제거
+        if line and not (line.startswith('번역:') and not line.startswith('번역 실패')):
+            cleaned_lines.append(line)
+    
+    return '\n'.join(cleaned_lines).strip()
 
 def perform_translation(text, target_lang, notam_type):
     """Gemini를 사용하여 NOTAM 번역 수행"""
@@ -286,6 +333,11 @@ Translated text:"""
    - "PREDICTED FOR"는 "에 영향을 줄 것으로 예측됨"으로 번역
    - "WILL TAKE PLACE"는 "진행될 예정"으로 번역
    - "NPA"는 "비정밀접근"으로 번역
+
+3. 중요한 규칙:
+   - 번역 결과에 "번역:", "공간", "이건 필요없는 말이야" 등의 불필요한 텍스트를 절대 포함하지 마세요
+   - 순수하게 NOTAM 내용만 번역하세요
+   - 번역 과정이나 메타데이터를 포함하지 마세요
    - "FLW"는 "다음과 같이"로 번역
    - "ACFT"는 "항공기"로 번역
    - "NR."는 "번호"로 번역
@@ -348,6 +400,9 @@ Translated text:"""
         return translated_text
     except Exception as e:
         print(f"번역 중 오류 발생: {str(e)}")
+        print(f"오류 타입: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
         return "번역 중 오류가 발생했습니다."
 
 def identify_notam_type(notam_number):
@@ -389,8 +444,46 @@ class NOTAMFilter:
     
     def __init__(self):
         """NOTAMFilter 초기화"""
+        # 로거 설정
+        self.logger = logging.getLogger(__name__)
+        
+        # 패키지별 공항 순서 정의
+        self.package_airport_order = {
+            'package1': ['RKSI', 'VVDN', 'VVTS', 'VVCR', 'SECY'],
+            'package2': ['RKSI', 'RKPC', 'ROAH', 'RJFF', 'RORS', 'RCTP', 'VHHH', 'ZJSY', 'VVNB', 'VVDN', 'VVTS'],
+            'package3': ['RKRR', 'RJJJ', 'RCAA', 'VHHK', 'ZJSA', 'VVHN', 'VVHM']
+        }
+        
+        # 로거 핸들러 설정
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.INFO)
+            
         # 공항 데이터 로드
         self.airports_data = self._load_airports_data()
+        
+    def _detect_package_type(self, text):
+        """텍스트에서 패키지 타입을 감지"""
+        if 'KOREAN AIR NOTAM PACKAGE 1' in text:
+            return 'package1'
+        elif 'KOREAN AIR NOTAM PACKAGE 2' in text:
+            return 'package2'
+        elif 'KOREAN AIR NOTAM PACKAGE 3' in text:
+            return 'package3'
+        return None
+        
+    def _get_airport_priority(self, airport_code, package_type):
+        """공항 코드의 우선순위를 반환"""
+        if package_type and package_type in self.package_airport_order:
+            order_list = self.package_airport_order[package_type]
+            try:
+                return order_list.index(airport_code)
+            except ValueError:
+                return 999  # 순서에 없는 공항은 마지막에
+        return 999
         
     def _load_airports_data(self):
         """공항 데이터 로드"""
@@ -404,13 +497,22 @@ class NOTAMFilter:
                 with open(csv_path, 'r', encoding='utf-8-sig') as f:
                     reader = csv.DictReader(f)
                     for row in reader:
-                        icao_code = row.get('ICAO')
+                        icao_code = row.get('ident')  # CSV 파일의 실제 컬럼명
                         if icao_code:
+                            time_zone = row.get('time_zone', 'UTC')
+                            # UTC+8 -> +08:00 형식으로 변환
+                            if time_zone.startswith('UTC+'):
+                                utc_offset = '+' + time_zone[4:].zfill(2) + ':00'
+                            elif time_zone.startswith('UTC-'):
+                                utc_offset = '-' + time_zone[4:].zfill(2) + ':00'
+                            else:
+                                utc_offset = '+00:00'
+                                
                             airports_data[icao_code] = {
-                                'name': row.get('Airport Name', ''),
-                                'country': row.get('Country', ''),
-                                'timezone': row.get('Timezone', 'UTC'),
-                                'utc_offset': row.get('UTC_Offset', '+00:00')
+                                'name': row.get('code', ''),
+                                'country': '',
+                                'timezone': time_zone,
+                                'utc_offset': utc_offset
                             }
             else:
                 print(f"공항 데이터 파일을 찾을 수 없습니다: {csv_path}")
@@ -432,38 +534,215 @@ class NOTAMFilter:
             return '+09:00'
         elif airport_code.startswith('ZB') or airport_code.startswith('ZG'):  # 중국
             return '+08:00'
+        elif airport_code.startswith('VV'):  # 베트남
+            return '+07:00'
         else:
             return '+00:00'  # UTC
     
+    def _clean_additional_info(self, notam_text):
+        """NOTAM에서 추가 정보 제거"""
+        lines = notam_text.split('\n')
+        cleaned_lines = []
+        
+        # 추가 정보 패턴들
+        additional_info_patterns = [
+            r'^\d+\.\s*COMPANY\s+RADIO\s*:',
+            r'^\d+\.\s*COMPANY\s+ADVISORY\s*:',
+            r'^\d+\.\s*RADIO\s*:',
+            r'^\d+\.\s*ADVISORY\s*:',
+            r'^\d+\.\s*[A-Z\s]+\s*:',
+            r'^\[PAX\]',
+            r'^\[JINAIR\]',
+            r'^CTC\s+TWR',
+            r'^NIL\s*$',
+            r'^COMMENT\)\s*$',
+            # 번호가 매겨진 COMPANY ADVISORY 항목들 (COAD NOTAM은 제외)
+            # r'^\d+\.\s+\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:UFN|PERM)\s+[A-Z]{4}\s+COAD\d+/\d+',  # COAD NOTAM은 유효한 NOTAM이므로 제거하지 않음
+            r'^\d+\.\s+\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:UFN|PERM)\s+[A-Z]{4}\s+(?!COAD)[A-Z]+\d+/\d+',
+            # OCR 오류 패턴들 추가
+            r'â—C¼O\s*MPANY',
+            r'â—C¼O\s*COMPANY',
+            r'â—A¼R\s*RIVAL',
+            r'â—O¼B\s*STRUCTION',
+            r'â—G¼P\s*S',
+            r'â—R¼U\s*NWAY',
+            r'â—A¼PP\s*ROACH',
+            r'â—T¼A\s*XIWAY',
+            r'â—N¼A\s*VAID',
+            r'â—D¼E\s*PARTURE',
+            r'â—R¼U\s*NWAY\s*LIGHT',
+            r'â—A¼IP',
+            r'â—O¼T\s*HER',
+            # 추가 패턴들 - 베트남 관련 내용
+            r'//REQUIRED WEATHER MINIMA IN VIETNAM//',
+            r'// SPEED LIMIT WHEN USING VDGS //',
+            r'CAAV\(CIVIL AVIATION AUTHORITY OF VIETNAM\)',
+            r'CARGO FLIGHTS ARE NOT ALLOWED TO LAND EARLIER',
+            r'PLZ DEPART TO HAN AFTER ETD ON FPL',
+            r'ANY QUESTIONS ABOUT ETD OF FLT',
+            r'CONTACT KOREANAIR DISPATCH BY CO-RADIO',
+            r'// SIMILAR CALLSIGN //',
+            r'KE\d+ AND KE\d+ MAY OPERATE ON SAME FREQ',
+            r'PLZ PAY MORE ATTENTION TO ATC COMMUNICATION',
+            r'CEILING IS ALWAYS SHOWN IN SMALLER SIZE',
+            r'MUST NOT EXCEED \d+KTS FROM STARTING POINT',
+            r'REDUCE SPEED TO STOP AT THE DESIGNATED STOP LINE',
+            # 기타 불필요한 패턴들
+            r'^\d+\.\s+ANY REVISION TO RWY CLOSURE',
+            r'^\d+\.\s+IN THE EVENT THAT THE OPERATIONAL RWY',
+            r'DEPENDENT ON THE WORK BEING CARRIED OUT',
+            r'IT MAY TAKE UP TO \d+ HRS FOR A CLOSED RWY',
+        ]
+        
+        for line in lines:
+            line_stripped = line.strip()
+            # 추가 정보 패턴에 매치되면 제거
+            if any(re.search(pattern, line_stripped, re.IGNORECASE) for pattern in additional_info_patterns):
+                continue
+            cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines).strip()
+    
     def _parse_notam_section(self, notam_text):
         """NOTAM 텍스트를 파싱하여 정보 추출"""
+        # 추가 정보 제거
+        cleaned_text = self._clean_additional_info(notam_text)
+        
         parsed_notam = {}
         
-        # ICAO 공항 코드 추출 (4글자)
-        airport_match = re.search(r'\b([A-Z]{4})\b', notam_text)
+        # NOTAM이 아닌 비정보 섹션 체크 (COMPANY ADVISORY 등)
+        if any(phrase in cleaned_text.upper() for phrase in ['COMPANY ADVISORY', 'OTHER INFORMATION', 'DEP:', 'DEST:', 'ALTN:', 'SECY']):
+            # 길이가 긴 경우 더 엄격한 체크
+            if len(cleaned_text) > 400:
+                self.logger.debug(f"긴 비NOTAM 섹션 감지하여 건너뛰기: {cleaned_text[:100]}...")
+                return {}
+        
+        # 공항 정보 섹션 체크 (특별한 패턴들)
+        airport_info_patterns = [
+            r'^\d+\. RUNWAY',  # "1. RUNWAY :"
+            r'^\d+\. COMPANY RADIO',  # "2. COMPANY RADIO :"
+            r'TAKEOFF PERFORMANCE INFORMATION',
+            r'NOTAM A\d{4}/\d{2}.*NO IMPACT',  # 성능 정보 관련
+            r'CHECK RWY ID FOR TODC REQUEST',
+            r'COMPANY MINIMA FOR CAT II/III',  # 추가 패턴
+            r'131\.500.*KOREAN AIR INCHEON',  # 주파수 정보
+            r'129\.35.*ASIANA INCHEON'  # 추가 주파수 정보
+        ]
+        
+        if any(re.search(pattern, cleaned_text, re.IGNORECASE) for pattern in airport_info_patterns):
+            if len(cleaned_text) > 500:  # 매우 긴 공항 정보 섹션
+                self.logger.debug(f"긴 공항 정보 섹션 감지하여 건너뛰기: {cleaned_text[:100]}...")
+                return {}
+        
+        # 추가 체크: 공항 정보로 보이는 특별한 패턴들
+        if cleaned_text.count('RWY') > 3 or cleaned_text.count('CAT') > 2:
+            if len(cleaned_text) > 800:  # 매우 긴 경로 정보나 성능 정보
+                self.logger.debug(f"매우 긴 공항 성능 정보 감지하여 건너뛰기: {cleaned_text[:100]}...")
+                return {}
+
+        # ICAO 공항 코드 추출 (더 유연한 패턴)
+        # 예: 28JUN25 00:00 - 25SEP25 23:59 LOWW A1483/25
+        # 예: 19SEP25 08:46 - UFN LOWW A2268/25
+        # 예: 24MAR23 16:00 - UFN RKRR CHINA SUP 16/21
+        # 예: 1. 20FEB25 00:00 - UFN RKSI COAD01/25
+        # '공항코드 (AIP SUP) NOTAM번호' 형식도 인식하도록 정규식 보완
+        airport_match = re.search(r'(?:\d+\.\s+)?\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+([A-Z]{4})(?:\s+(?:AIP\s+SUP|CHINA\s+SUP|COAD))?\s+[A-Z0-9]+/\d{2}', cleaned_text)
         if airport_match:
             parsed_notam['airport_code'] = airport_match.group(1)
+        else:
+            # 보완 패턴: 더 일반적인 4자리 공항 코드 패턴 (AIP SUP, CHINA SUP, COAD 포함)
+            airport_fallback = re.search(r'\b([A-Z]{4})(?:\s+(?:AIP\s+SUP|CHINA\s+SUP|COAD))?\s+[A-Z0-9]+/\d{2}', cleaned_text)
+            if airport_fallback:
+                parsed_notam['airport_code'] = airport_fallback.group(1)
+            else:
+                # COAD 패턴 직접 매칭
+                coad_airport_match = re.search(r'([A-Z]{4})\s+COAD\d{2}/\d{2}', cleaned_text)
+                if coad_airport_match:
+                    parsed_notam['airport_code'] = coad_airport_match.group(1)
+                else:
+                    # 실제 COAD NOTAM인지 확인 (시간 정보가 있는지 체크)
+                    has_time_pattern = re.search(r'\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)', cleaned_text)
+                    # COAD가 포함되어 있지만 시간 정보가 없는 경우는 fake일 가능성이 높음
+                    # 하지만 너무 엄격하지 않게 수정 (길이 제한을 더 크게)
+                    if 'coad' in cleaned_text.lower() and not has_time_pattern and len(cleaned_text) > 800:
+                        self.logger.debug(f"시간 정보 없는 매우 긴 COAD 섹션 건너뛰기: {cleaned_text[:100]}...")
+                        return {}
+                    # E) 형식 NOTAM (공항 이름에서 추출)
+                    if cleaned_text.strip().startswith('E)'):
+                        # HONG KONG -> VHHH, 등 매핑 
+                        if 'HONG KONG' in cleaned_text.upper():
+                            parsed_notam['airport_code'] = 'VHHH'
+                        elif 'INCHEON' in cleaned_text.upper():
+                            parsed_notam['airport_code'] = 'RKSI'
+                        elif 'GIMPO' in cleaned_text.upper():
+                            parsed_notam['airport_code'] = 'RKSS'
+                        else:
+                            # 기본값 설정
+                            parsed_notam['airport_code'] = 'UNKNOWN'
         
-        # NOTAM 번호 추출
-        notam_number_match = re.search(r'([A-Z]\d{4}/\d{2})', notam_text)
+        # NOTAM 번호 추출 (AIP SUP, CHINA SUP, COAD 등 다양한 형식 지원)
+        notam_number_match = re.search(r'(?:\d+\.\s+)?\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}(?:\s+(?:AIP\s+SUP|CHINA\s+SUP|COAD))?\s+([A-Z0-9]+/\d{2})', cleaned_text)
         if notam_number_match:
-            parsed_notam['notam_number'] = notam_number_match.group(1)
+            # AIP SUP나 CHINA SUP가 있으면 전체를 붙여서 사용
+            aip_sup_match = re.search(r'(?:\d+\.\s+)?\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}\s+(AIP\s+SUP|CHINA\s+SUP|COAD)\s+([A-Z0-9]+/\d{2})', cleaned_text)
+            if aip_sup_match:
+                parsed_notam['notam_number'] = f"{aip_sup_match.group(1)} {aip_sup_match.group(2)}"
+            else:
+                parsed_notam['notam_number'] = notam_number_match.group(1)
+        else:
+            # 보완 패턴: AIP SUP, CHINA SUP, COAD 포함 일반적인 NOTAM 번호 패턴
+            notam_fallback = re.search(r'(AIP\s+SUP|CHINA\s+SUP|COAD)\s+([A-Z0-9]+/\d{2})', cleaned_text)
+            if notam_fallback:
+                parsed_notam['notam_number'] = f"{notam_fallback.group(1)} {notam_fallback.group(2)}"
+            else:
+                # COAD 패턴 직접 매칭
+                coad_match = re.search(r'([A-Z]{4})\s+COAD(\d{2}/\d{2})', cleaned_text)
+                if coad_match:
+                    parsed_notam['notam_number'] = f"COAD{coad_match.group(2)}"
+                else:
+                    # 기존 패턴도 시도
+                    notam_fallback2 = re.search(r'\b([A-Z]\d{4}/\d{2})\b', cleaned_text)
+                    if notam_fallback2:
+                        parsed_notam['notam_number'] = notam_fallback2.group(1)
         
         # 시간 정보 파싱
-        self._parse_time_info(notam_text, parsed_notam)
+        self._parse_time_info(cleaned_text, parsed_notam)
         
-        # E) 필드 추출
-        e_field_match = re.search(r'E\)\s*(.+?)(?=\s*F\)|$)', notam_text, re.DOTALL)
+        # D) 필드 추출 (시간대 정보) - 원본 텍스트에서 추출
+        lines = cleaned_text.split('\n')
+        for i, line in enumerate(lines):
+            if line.strip().startswith('D)'):
+                d_content = []
+                # D) 다음 줄들도 포함
+                for j in range(i, len(lines)):
+                    if j == i:
+                        d_content.append(lines[j].strip()[2:].strip())  # D) 제거
+                    elif lines[j].strip() and not lines[j].strip().startswith(('E)', 'F)', 'G)')):
+                        d_content.append(lines[j].strip())
+                    else:
+                        break
+                if d_content:
+                    parsed_notam['d_field'] = '\n'.join(d_content)
+                break
+        
+        
+        # E) 필드 추출 - 더 유연한 종료 조건 사용
+        e_field_match = re.search(r'E\)\s*(.+?)(?=(?:\n|^)\s*={20,}\s*$|(?:\n|^)\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}|(?:\n|^)\s*=+\s*$|(?:\n|^)={20,}(?:\n|$)|$)', cleaned_text, re.DOTALL)
         if e_field_match:
-            parsed_notam['e_field'] = e_field_match.group(1).strip()
+            e_field = e_field_match.group(1).strip()
+            # NO CURRENT NOTAMS FOUND 이후의 내용 제거
+            e_field = re.sub(r'\*{8}\s*NO CURRENT NOTAMS FOUND\s*\*{8}.*$', '', e_field, flags=re.DOTALL | re.IGNORECASE).strip()
+            # E) 필드에 색상 스타일 적용
+            e_field = apply_color_styles(e_field)
+            parsed_notam['e_field'] = e_field
         
         return parsed_notam
     
     def _parse_time_info(self, notam_text, parsed_notam):
         """시간 정보 파싱 (UFN 지원 포함)"""
         
-        # 1. UFN (Until Further Notice) 패턴 먼저 확인
-        ufn_pattern = r'(\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2}) - UFN'
+        # 1. UFN (Until Further Notice) 패턴 먼저 확인 (번호 포함)
+        ufn_pattern = r'(?:\d+\.\s+)?(\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2}) - UFN'
         ufn_match = re.search(ufn_pattern, notam_text)
         
         if ufn_match:
@@ -491,8 +770,8 @@ class NOTAMFilter:
             except Exception as e:
                 print(f"UFN 시간 파싱 오류: {e}")
         
-        # 2. WEF/TIL 패턴
-        wef_til_pattern = r'(\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2}) - (\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2})'
+        # 2. WEF/TIL 패턴 (번호 포함)
+        wef_til_pattern = r'(?:\d+\.\s+)?(\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2}) - (\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2})'
         wef_til_match = re.search(wef_til_pattern, notam_text)
         
         if wef_til_match:
@@ -589,13 +868,20 @@ class NOTAMFilter:
                 # 만료 시간이 없는 경우
                 local_time_str = f"{local_start.strftime('%m/%d %H:%M')} ({timezone_offset})"
             
+            # D) 필드가 있으면 시간대 정보 추가
+            if parsed_notam and parsed_notam.get('d_field'):
+                d_field = parsed_notam['d_field'].strip()
+                # D) 필드의 시간 정보를 로컬 시간으로 변환
+                local_d_field = self._convert_d_field_to_local_time(d_field, timezone_offset)
+                local_time_str += f" / 시간대: {local_d_field}({timezone_offset})"
+            
             return local_time_str
             
         except Exception as e:
             print(f"로컬 시간 변환 오류: {e}")
             return None
     
-    def format_notam_time_with_local(self, effective_time, expiry_time, airport_code):
+    def format_notam_time_with_local(self, effective_time, expiry_time, airport_code, parsed_notam=None):
         """NOTAM 시간을 로컬 시간으로 포맷팅"""
         if not effective_time:
             return None
@@ -628,51 +914,558 @@ class NOTAMFilter:
                 # 만료 시간이 없는 경우
                 local_time_str = f"{local_start.strftime('%m/%d %H:%M')} ({timezone_offset})"
             
+            # D) 필드가 있으면 시간대 정보 추가
+            if parsed_notam and parsed_notam.get('d_field'):
+                d_field = parsed_notam['d_field'].strip()
+                # D) 필드의 시간 정보를 로컬 시간으로 변환
+                local_d_field = self._convert_d_field_to_local_time(d_field, timezone_offset)
+                local_time_str += f" / 시간대: {local_d_field}({timezone_offset})"
+            
             return local_time_str
             
         except Exception as e:
             print(f"시간 포맷팅 오류: {e}")
             return None
     
+    def _convert_d_field_to_local_time(self, d_field, timezone_offset):
+        """D) 필드의 시간을 로컬 시간으로 변환"""
+        try:
+            import re
+            from datetime import datetime, timedelta
+            
+            # 타임존 오프셋 파싱 (+07:00 형식)
+            offset_sign = 1 if timezone_offset.startswith('+') else -1
+            offset_hours = int(timezone_offset[1:3])
+            offset_minutes = int(timezone_offset[4:6])
+            offset_delta = timedelta(hours=offset_hours * offset_sign, minutes=offset_minutes * offset_sign)
+            
+            lines = d_field.split('\n')
+            converted_lines = []
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # 날짜와 시간 패턴 매칭 (예: "05 1900-1930", "06-29 1900-2300")
+                # 단일 날짜 패턴: DD HHMM-HHMM
+                single_date_match = re.match(r'^(\d{1,2})\s+(\d{4})-(\d{4})$', line)
+                if single_date_match:
+                    day = int(single_date_match.group(1))
+                    start_time = single_date_match.group(2)
+                    end_time = single_date_match.group(3)
+                    
+                    # UTC 시간을 datetime으로 변환 (2025년 9월 기준)
+                    utc_start = datetime(2025, 9, day, int(start_time[:2]), int(start_time[2:]))
+                    utc_end = datetime(2025, 9, day, int(end_time[:2]), int(end_time[2:]))
+                    
+                    # 로컬 시간으로 변환
+                    local_start = utc_start + offset_delta
+                    local_end = utc_end + offset_delta
+                    
+                    # 날짜가 바뀌는 경우 처리
+                    if local_start.day != day:
+                        day_str = f"{local_start.day:02d}"
+                    else:
+                        day_str = f"{day:02d}"
+                    
+                    converted_line = f"{day_str} {local_start.strftime('%H%M')}-{local_end.strftime('%H%M')}"
+                    converted_lines.append(converted_line)
+                    continue
+                
+                # 날짜 범위 패턴: DD-DD HHMM-HHMM
+                date_range_match = re.match(r'^(\d{1,2})-(\d{1,2})\s+(\d{4})-(\d{4})$', line)
+                if date_range_match:
+                    start_day = int(date_range_match.group(1))
+                    end_day = int(date_range_match.group(2))
+                    start_time = date_range_match.group(3)
+                    end_time = date_range_match.group(4)
+                    
+                    # UTC 시간을 datetime으로 변환
+                    utc_start = datetime(2025, 9, start_day, int(start_time[:2]), int(start_time[2:]))
+                    utc_end = datetime(2025, 9, end_day, int(end_time[:2]), int(end_time[2:]))
+                    
+                    # 로컬 시간으로 변환
+                    local_start = utc_start + offset_delta
+                    local_end = utc_end + offset_delta
+                    
+                    # 날짜 범위 문자열 생성
+                    if local_start.day != start_day or local_end.day != end_day:
+                        converted_line = f"{local_start.day:02d}-{local_end.day:02d} {local_start.strftime('%H%M')}-{local_end.strftime('%H%M')}"
+                    else:
+                        converted_line = f"{start_day:02d}-{end_day:02d} {local_start.strftime('%H%M')}-{local_end.strftime('%H%M')}"
+                    
+                    converted_lines.append(converted_line)
+                    continue
+                
+                # 변환할 수 없는 패턴은 그대로 유지
+                converted_lines.append(line)
+            
+            return '\n'.join(converted_lines)
+            
+        except Exception as e:
+            print(f"D) 필드 시간 변환 오류: {e}")
+            return d_field  # 오류 시 원본 반환
+
+    def _detect_notam_type(self, text):
+        """텍스트에서 NOTAM 유형을 감지 (package or airport)"""
+        if 'KOREAN AIR NOTAM PACKAGE' in text.upper():
+            return 'package'
+        return 'airport'
+
     def filter_korean_air_notams(self, text):
-        """한국 항공 관련 NOTAM 필터링"""
-        korean_airports = ['RKSI', 'RKPK', 'RKPC', 'RKTU', 'RKJJ', 'RKNY', 'RKJY', 'RKJB', 'RKJK']
+        """한국 항공사 노선 관련 모든 공항 NOTAM 처리 (패키지/개별 공항 자동 감지)"""
+        import re
         
-        # NOTAM 섹션으로 분할 (공항코드 + NOTAM번호 패턴)
-        notam_sections = re.split(r'\n(?=[A-Z]{4}\s+[A-Z]\d{3,4}/\d{2})', text)
+        # NOTAM 유형 감지
+        notam_type = self._detect_notam_type(text)
+        self.logger.info(f"NOTAM 유형 감지: {notam_type}")
+        
+        if notam_type == 'package':
+            return self._filter_package_notams(text)
+        else:
+            return self._filter_airport_notams(text)
+
+    def _filter_airport_notams(self, text):
+        """공항 NOTAM 필터링 (기존 로직)"""
+        import re
+        
+        # 더 유연한 NOTAM 시작 패턴 (다양한 형식 지원, SECY 제외, 번호 포함)
+        notam_start_patterns = [
+            r'^(?:\d+\.\s+)?\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)\s+[A-Z]{4}(?!\s+SECY)',  # 번호 포함 패턴 (SECY 제외)
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)\s+[A-Z]{4}(?!\s+SECY)',  # 기존 패턴 (SECY 제외)
+            r'^(?:\d+\.\s+)?\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)\s+[A-Z]{4}\s+(?!SECY)[A-Z0-9]+/\d{2}',  # 번호 포함 NOTAM 번호 패턴 (SECY 제외)
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)\s+[A-Z]{4}\s+(?!SECY)[A-Z0-9]+/\d{2}',  # NOTAM 번호 포함 (SECY 제외)
+            r'^(?:\d+\.\s+)?\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)\s+[A-Z]{4}\s+AIP\s+SUP\s+\d{2}/\d{2}',  # 번호 포함 AIP SUP 형식
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)\s+[A-Z]{4}\s+AIP\s+SUP\s+\d{2}/\d{2}',  # AIP SUP 형식
+            r'^[A-Z]{4}\s+COAD\d{2}/\d{2}$',  # VVCR COAD01/25 형식
+        ]
+        section_end_patterns = [
+            r'^\[ALTN\]', r'^\[DEST\]', r'^\[ENRT\]', r'^\[ETC\]', r'^\[INFO\]', r'^\[ROUTE\]', r'^\[WX\]',
+            r'^COAD',
+            r'^[A-Z]{4} COAD\d{2}/\d{2}',
+            r'^[A-Z]{4}\s*$',  # 공항코드만 단독 등장
+            r'^={4,}$'  # 4개 이상의 등호로만 구성된 줄 (NOTAM 구분선)
+        ]
+        
+        # 기존 공항 NOTAM 필터링 로직
+        lines = text.split('\n')
+        notam_sections = []
+        current_notam = []
+        found_first_notam = False
+        skip_mode = False
+        
+        for line in lines:
+            # skip_mode가 True일 때는 새로운 NOTAM 시작 패턴만 처리하고 나머지는 모두 건너뛰기
+            if skip_mode:
+                # 여러 패턴 시도
+                if any(re.match(pattern, line) for pattern in notam_start_patterns):
+                    found_first_notam = True
+                    skip_mode = False
+                    if current_notam:
+                        notam_sections.append('\n'.join(current_notam).strip())
+                        current_notam = []
+                    current_notam.append(line)
+                    self.logger.debug(f"새로운 NOTAM 시작으로 skip_mode 해제: {line.strip()[:50]}...")
+                # skip_mode가 True면 어떤 줄도 current_notam에 추가하지 않음
+                continue
+            
+            # END OF KOREAN AIR NOTAM PACKAGE 처리 - 현재 NOTAM을 종료하고 END OF KOREAN AIR NOTAM PACKAGE 이후 모든 내용 건너뛰기
+            if re.search(r'END OF KOREAN AIR NOTAM PACKAGE', line.strip(), re.IGNORECASE):
+                if current_notam:
+                    notam_sections.append('\n'.join(current_notam).strip())
+                    self.logger.debug(f"END OF KOREAN AIR NOTAM PACKAGE로 NOTAM 종료: {len(current_notam)}줄")
+                    current_notam = []
+                # END OF KOREAN AIR NOTAM PACKAGE 이후 모든 내용을 건너뛰기 위해 skip_mode 활성화
+                skip_mode = True
+                self.logger.debug(f"END OF KOREAN AIR NOTAM PACKAGE 이후 건너뛰기 시작")
+                # END OF KOREAN AIR NOTAM PACKAGE 라인 자체도 current_notam에 추가하지 않음
+                continue
+                
+            # NO CURRENT NOTAMS FOUND 처리 - 현재 NOTAM을 종료하고 이후 모든 내용 건너뛰기
+            if re.search(r'\*{8}\s*NO CURRENT NOTAMS FOUND\s*\*{8}', line.strip(), re.IGNORECASE):
+                if current_notam:
+                    notam_sections.append('\n'.join(current_notam).strip())
+                    self.logger.debug(f"NO CURRENT NOTAMS FOUND로 NOTAM 종료: {len(current_notam)}줄")
+                    current_notam = []
+                # NO CURRENT NOTAMS FOUND 이후 모든 내용을 건너뛰기 위해 skip_mode 활성화
+                skip_mode = True
+                self.logger.debug(f"NO CURRENT NOTAMS FOUND 이후 건너뛰기 시작")
+                # NO CURRENT NOTAMS FOUND 라인 자체도 current_notam에 추가하지 않음
+                continue
+                
+            # SECY 관련 패턴 완전 제외
+            if (re.search(r'SECY\s*/\s*SECURITY INFORMATION', line.strip(), re.IGNORECASE) or
+                re.search(r'SECY\s+COAD\d+/\d+', line.strip(), re.IGNORECASE) or
+                re.search(r'\d+\.\s+\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s+SECY', line.strip(), re.IGNORECASE)):
+                # SECY 섹션 전체를 건너뛰기 위해 skip_mode 활성화
+                skip_mode = True
+                self.logger.debug(f"SECY 관련 패턴 건너뛰기 시작: {line.strip()}")
+                continue
+                
+            # COMPANY ADVISORY 섹션 완전 제외 - 모든 COMPANY ADVISORY 관련 내용 건너뛰기
+            if re.search(r'COMPANY ADVISORY|MPANY ADVISORY', line.strip(), re.IGNORECASE):
+                # COMPANY ADVISORY 섹션 전체를 건너뛰기 위해 skip_mode 활성화
+                skip_mode = True
+                self.logger.debug(f"COMPANY ADVISORY 섹션 건너뛰기 시작: {line.strip()}")
+                continue
+                
+            # SECY 섹션 내 개별 항목들도 건너뛰기 (1., 2., 3. 등)
+            if re.search(r'^\d+\.\s+\d{2}[A-Z]{3}\d{2}', line.strip()) and skip_mode:
+                self.logger.debug(f"SECY/COMPANY ADVISORY 항목 건너뛰기: {line.strip()[:50]}...")
+                continue
+                
+            # COMPANY ADVISORY 항목 종료 패턴에서 skip_mode 해제
+            if re.search(r'--\s+BY\s+[A-Z]+--', line.strip()) and skip_mode:
+                self.logger.debug(f"COMPANY ADVISORY 섹션 건너뛰기 종료")
+                skip_mode = False
+                continue
+                
+            # COMPANY ADVISORY 섹션에서 새로운 NOTAM이 시작되면 skip_mode 해제
+            # 여러 패턴 시도하여 NOTAM 시작 확인
+            notam_start_found = any(re.match(pattern, line) for pattern in notam_start_patterns)
+            
+            if notam_start_found and skip_mode:
+                self.logger.debug(f"새로운 NOTAM 시작으로 COMPANY ADVISORY skip_mode 해제")
+                skip_mode = False
+                found_first_notam = True
+                if current_notam:
+                    notam_sections.append('\n'.join(current_notam).strip())
+                    current_notam = []
+                current_notam.append(line)
+                continue
+                
+            if notam_start_found:
+                found_first_notam = True
+                skip_mode = False
+                if current_notam:
+                    notam_sections.append('\n'.join(current_notam).strip())
+                    self.logger.debug(f"새 NOTAM 시작으로 이전 NOTAM 종료: {len(current_notam)}줄")
+                    current_notam = []
+                current_notam.append(line)
+                self.logger.debug(f"새 NOTAM 시작: {line.strip()[:50]}...")
+            elif any(re.match(pat, line) for pat in section_end_patterns):
+                if current_notam:
+                    notam_sections.append('\n'.join(current_notam).strip())
+                    current_notam = []
+                skip_mode = True
+            elif found_first_notam:
+                current_notam.append(line)
+                
+        if current_notam:
+            notam_sections.append('\n'.join(current_notam).strip())
+
         filtered_notams = []
-        
-        for section in notam_sections:
+        self.logger.info(f"총 {len(notam_sections)}개의 NOTAM 섹션으로 분할됨")
+
+        for i, section in enumerate(notam_sections):
             section = section.strip()
             if not section:
                 continue
+
+            # NOTAM 파싱
+            parsed_notam = self._parse_notam_section(section)
+
+            self.logger.debug(f"섹션 {i+1}: 공항코드={parsed_notam.get('airport_code')}, NOTAM번호={parsed_notam.get('notam_number')}")
+
+            # 공항 코드가 있는 모든 NOTAM 처리 (한국 공항이 아니어도 포함)
+            if parsed_notam.get('airport_code'):
+                # 기본 정보 설정
+                # COAD NOTAM의 경우 E) 필드가 없으므로 전체 섹션을 description으로 사용
+                description = parsed_notam.get('e_field') or section
                 
-            # 한국 공항 코드가 포함된 NOTAM만 필터링
-            for airport in korean_airports:
-                if airport in section:
-                    # NOTAM 파싱
-                    parsed_notam = self._parse_notam_section(section)
-                    
-                    # 기본 정보 설정
-                    notam_dict = {
-                        'id': parsed_notam.get('notam_number', 'Unknown'),
-                        'notam_number': parsed_notam.get('notam_number', 'Unknown'),
-                        'airport_code': parsed_notam.get('airport_code', airport),
-                        'effective_time': parsed_notam.get('effective_time', ''),
-                        'expiry_time': parsed_notam.get('expiry_time', ''),
-                        'description': parsed_notam.get('e_field', section),
-                        'original_text': section
-                    }
-                    
-                    # UFN을 포함한 모든 시간 정보에 대해 local_time_display 생성
-                    if parsed_notam.get('effective_time') and (parsed_notam.get('expiry_time') or parsed_notam.get('expiry_time') == 'UFN'):
-                        local_time_display = self._generate_local_time_display(parsed_notam)
-                        if local_time_display:
-                            notam_dict['local_time_display'] = local_time_display
-                            # 원본 텍스트에도 로컬 시간 추가
-                            notam_dict['original_text'] = section + f"\n\n로컬 시간: {local_time_display}"
-                    
-                    filtered_notams.append(notam_dict)
-                    break
-        
+                # E 섹션만 추출하여 원문으로 사용
+                e_section = extract_e_section(section)
+                if not e_section:
+                    e_section = description  # E 섹션이 없으면 description 사용
+                
+                # 원문에도 색상 스타일 적용
+                styled_section = apply_color_styles(e_section)
+                
+                notam_dict = {
+                    'id': parsed_notam.get('notam_number', 'Unknown'),
+                    'notam_number': parsed_notam.get('notam_number', 'Unknown'),
+                    'airport_code': parsed_notam.get('airport_code'),
+                    'effective_time': parsed_notam.get('effective_time', ''),
+                    'expiry_time': parsed_notam.get('expiry_time', ''),
+                    'description': description,
+                    'original_text': styled_section,
+                    'd_field': parsed_notam.get('d_field', ''),
+                    'e_field': parsed_notam.get('e_field', '')
+                }
+
+                # UFN을 포함한 모든 시간 정보에 대해 local_time_display 생성
+                if parsed_notam.get('effective_time') and (parsed_notam.get('expiry_time') or parsed_notam.get('expiry_time') == 'UFN'):
+                    local_time_display = self._generate_local_time_display(parsed_notam)
+                    if local_time_display:
+                        notam_dict['local_time_display'] = local_time_display
+                        # 원본 텍스트에는 로컬 시간 추가하지 않음 (별도 필드로 관리)
+
+                filtered_notams.append(notam_dict)
+            else:
+                self.logger.warning(f"섹션 {i+1}: 공항 코드를 찾을 수 없음 (섹션 시작: {section[:100]}...)")
+
+        self.logger.info(f"최종 {len(filtered_notams)}개의 NOTAM 추출 완료")
         return filtered_notams
+    
+    def _extract_content_after_notam_number(self, text, notam_number):
+        """NOTAM 번호 이후의 내용만 추출합니다."""
+        self.logger.info(f"🔍 원문 추출 시작 - NOTAM: {notam_number}")
+        self.logger.info(f"📝 원본 텍스트 길이: {len(text)}")
+        
+        if not notam_number:
+            self.logger.warning("⚠️ NOTAM 번호가 없어서 원본 텍스트 반환")
+            return text
+        
+        # NOTAM 번호를 찾아서 그 이후의 내용을 추출
+        # 다양한 패턴으로 NOTAM 번호를 찾습니다
+        patterns = [
+            # COAD 패턴: RKSI COAD01/25
+            rf'([A-Z]{{4}}\s+)?{re.escape(notam_number)}',
+            # AIP SUP 패턴: AIP SUP 20/25
+            rf'(AIP\s+SUP\s+)?{re.escape(notam_number)}',
+            # 일반 패턴: A1234/25
+            rf'\b{re.escape(notam_number)}\b'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                # NOTAM 번호 이후의 내용 추출
+                after_notam = text[match.end():].strip()
+                
+                # // 로 시작하는 경우 // 제거
+                if after_notam.startswith('//'):
+                    after_notam = after_notam[2:].strip()
+                
+                # -- BY로 끝나는 경우 그 이후 제거
+                by_match = re.search(r'--\s*BY\s+[A-Z]+--', after_notam)
+                if by_match:
+                    after_notam = after_notam[:by_match.start()].strip()
+                
+                self.logger.info(f"✅ 첫 번째 패턴으로 추출 성공: {len(after_notam)}자")
+                return after_notam
+        
+        # 패턴을 찾지 못한 경우, 더 간단한 방법으로 시도
+        # NOTAM 번호만으로 직접 찾기
+        simple_patterns = [
+            rf'{re.escape(notam_number)}\s*//',  # COAD01/25 //
+            rf'{re.escape(notam_number)}\s+//',  # COAD01/25 //
+            rf'{re.escape(notam_number)}\s*$',   # 줄 끝에 있는 경우
+        ]
+        
+        for pattern in simple_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                after_notam = text[match.end():].strip()
+                if after_notam.startswith('//'):
+                    after_notam = after_notam[2:].strip()
+                
+                by_match = re.search(r'--\s*BY\s+[A-Z]+--', after_notam)
+                if by_match:
+                    after_notam = after_notam[:by_match.start()].strip()
+                
+                self.logger.info(f"✅ 간단한 패턴으로 추출 성공: {len(after_notam)}자")
+                return after_notam
+        
+        # 모든 패턴을 찾지 못한 경우 원본 텍스트 반환
+        self.logger.warning(f"❌ 패턴을 찾지 못해서 원본 텍스트 반환")
+        return text
+
+    def _filter_package_notams(self, text):
+        """패키지 NOTAM 필터링 (pdf_to_txt_test_package.py 기반)"""
+        import re
+        
+        # 패키지 NOTAM의 복잡한 구조를 처리하기 위한 로직
+        # 먼저 라인 병합 처리
+        merged_text = self._merge_package_notam_lines(text)
+        
+        # NOTAM 분리
+        notam_sections = self._split_package_notams(merged_text)
+        
+        filtered_notams = []
+        self.logger.info(f"패키지 NOTAM 총 {len(notam_sections)}개의 섹션으로 분할됨")
+
+        for i, section in enumerate(notam_sections):
+            section = section.strip()
+            if not section:
+                continue
+
+            # NOTAM 파싱
+            parsed_notam = self._parse_notam_section(section)
+
+            self.logger.debug(f"패키지 섹션 {i+1}: 공항코드={parsed_notam.get('airport_code')}, NOTAM번호={parsed_notam.get('notam_number')}")
+
+            # 공항 코드가 있는 모든 NOTAM 처리
+            if parsed_notam.get('airport_code'):
+                # 기본 정보 설정
+                # 원문에서 NOTAM 번호 이후의 내용만 추출
+                original_content = self._extract_content_after_notam_number(section, parsed_notam.get('notam_number', ''))
+                self.logger.debug(f"원문 추출 - NOTAM: {parsed_notam.get('notam_number')}, 원본 길이: {len(section)}, 추출된 길이: {len(original_content)}")
+                styled_original = apply_color_styles(original_content)
+                
+                notam_dict = {
+                    'id': parsed_notam.get('notam_number', 'Unknown'),
+                    'notam_number': parsed_notam.get('notam_number', 'Unknown'),
+                    'airport_code': parsed_notam.get('airport_code'),
+                    'effective_time': parsed_notam.get('effective_time', ''),
+                    'expiry_time': parsed_notam.get('expiry_time', ''),
+                    'description': parsed_notam.get('e_field', section),
+                    'original_text': styled_original,
+                    'd_field': parsed_notam.get('d_field', '')  # D) 필드 추가
+                }
+
+                # UFN을 포함한 모든 시간 정보에 대해 local_time_display 생성
+                if parsed_notam.get('effective_time') and (parsed_notam.get('expiry_time') or parsed_notam.get('expiry_time') == 'UFN'):
+                    local_time_display = self._generate_local_time_display(parsed_notam)
+                    if local_time_display:
+                        notam_dict['local_time_display'] = local_time_display
+                        # 원본 텍스트에는 로컬 시간 추가하지 않음 (별도 필드로 관리)
+
+                filtered_notams.append(notam_dict)
+            else:
+                self.logger.warning(f"패키지 섹션 {i+1}: 공항 코드를 찾을 수 없음 (섹션 시작: {section[:100]}...)")
+
+        # 패키지 타입 감지 및 공항 순서 정렬
+        package_type = self._detect_package_type(text)
+        if package_type:
+            self.logger.info(f"패키지 타입 감지: {package_type}")
+            # 공항 순서에 따라 정렬
+            filtered_notams.sort(key=lambda x: self._get_airport_priority(x.get('airport_code', ''), package_type))
+            self.logger.info(f"패키지별 공항 순서로 정렬 완료: {package_type}")
+            
+            # 정렬 후 순서 로깅
+            self.logger.info("=== 패키지별 공항 순서로 정렬된 NOTAM ===")
+            for i, notam in enumerate(filtered_notams[:10], 1):  # 첫 10개만 로깅
+                airport = notam.get('airport_code', 'N/A')
+                notam_num = notam.get('notam_number', 'N/A')
+                priority = self._get_airport_priority(airport, package_type)
+                self.logger.info(f"정렬 후 {i}: {airport} {notam_num} (우선순위: {priority})")
+        else:
+            self.logger.warning("패키지 타입을 감지할 수 없음 - 원본 순서 유지")
+        
+        self.logger.info(f"패키지 NOTAM 최종 {len(filtered_notams)}개의 NOTAM 추출 완료")
+        return filtered_notams
+
+    def _merge_package_notam_lines(self, text):
+        """패키지 NOTAM 라인 병합 (pdf_to_txt_test_package.py 기반)"""
+        lines = text.split('\n')
+        
+        # 삭제할 키워드 목록 (OCR 오류 패턴 포함)
+        unwanted_keywords = [
+            'â—R¼A MP', 'â—O¼B STRUCTION', 'â—G¼P S', 'â—R¼U NWAY', 'â—A¼PP ROACH', 'â—T¼A XIWAY',
+            'â—N¼A VAID', 'â—D¼E PARTURE', 'â—R¼U NWAY LIGHT', 'â—A¼IP', 'â—O¼T HER'
+        ]
+        
+        # 불필요한 키워드가 포함된 줄 삭제
+        filtered_lines = [line for line in lines if not any(keyword in line for keyword in unwanted_keywords)]
+        
+        merged_lines = []
+        i = 0
+        
+        # 더 정확한 패턴들
+        notam_id_pattern = r'^[A-Z]{4}(?:\s+[A-Z]+(?:\s+[A-Z]+)*)?\s+\d{1,3}/\d{2}$|^[A-Z]{4}\s+[A-Z]\d{4}/\d{2}$'
+        coad_pattern = r'^[A-Z]{4}\s+COAD\d{2}/\d{2}$'  # COAD 패턴 추가
+        date_line_pattern = r'^(?:\d+\.\s+)?\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-'  # "3. " 패턴 포함
+        
+        while i < len(filtered_lines):
+            line = filtered_lines[i].strip()
+            
+            # COAD NOTAM ID 패턴 체크
+            if re.match(coad_pattern, line):
+                # 다음 줄이 날짜 패턴이면 합침
+                if i + 1 < len(filtered_lines) and re.match(date_line_pattern, filtered_lines[i+1].strip()):
+                    next_line = filtered_lines[i+1].strip()
+                    # "3. " 같은 번호 접두사 제거
+                    cleaned_date_line = re.sub(r'^\d+\.\s+', '', next_line)
+                    merged_lines.append(f"{cleaned_date_line} {line}")
+                    i += 2
+                    continue
+            
+            # 일반 NOTAM ID 패턴 체크
+            elif re.match(notam_id_pattern, line):
+                # 다음 줄이 날짜 패턴이면 합침
+                if i + 1 < len(filtered_lines) and re.match(date_line_pattern, filtered_lines[i+1].strip()):
+                    next_line = filtered_lines[i+1].strip()
+                    # "3. " 같은 번호 접두사 제거
+                    cleaned_date_line = re.sub(r'^\d+\.\s+', '', next_line)
+                    merged_lines.append(f"{cleaned_date_line} {line}")
+                    i += 2
+                    continue
+            
+            merged_lines.append(line)
+            i += 1
+            
+        return '\n'.join(merged_lines)
+
+    def _split_package_notams(self, text):
+        """패키지 NOTAM들을 원본 텍스트 파일의 줄 순서로 분할"""
+        # 줄번호와 함께 관리하여 원본 ORDER 유지
+        lines_with_index = []
+        for i, line in enumerate(text.split('\n'), 1):
+            if line.strip():  # 빈 줄이 아닌 경우만
+                lines_with_index.append((i, line.strip()))
+        
+        # 패턴 정의 - 더 정확한 NOTAM 시작 패턴들
+        notam_start_pattern = r'^(?:\d+\.\s+)?\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-'
+        section_start_pattern = r'^\[.*\]'
+        notam_id_pattern = r'^[A-Z]{4}(?:\s+(?!COAD)[A-Z]+)?\s*\d{1,3}/\d{2}$|^[A-Z]{4}\s+[A-Z]\d{4}/\d{2}$'
+        coad_pattern = r'^[A-Z]{4}\s+COAD\d{2}/\d{2}$'  # COAD NOTAM 패턴 추가
+        
+        # 새로운 NOTAM 시작을 감지하는 더 정확한 패턴들
+        new_notam_patterns = [
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}\s+[A-Z]\d{4}/\d{2}',  # 일반 NOTAM
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}\s+AIP\s+SUP\s+\d+/\d{2}',  # AIP SUP
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}\s+Z\d{4}/\d{2}',  # Z NOTAM
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}\s+COAD\d{2}/\d{2}',  # COAD
+        ]
+        
+        end_phrase_pattern = r'ANY CHANGE WILL BE NOTIFIED BY NOTAM\.'
+
+        notams_with_index = []
+        current_notam_lines = []
+        
+        for line_num, line in lines_with_index:
+            # 구분선 감지 (먼저 체크) - = 구분선만 사용
+            if re.match(r'^={20,}$', line):
+                if current_notam_lines:
+                    notams_with_index.append((current_notam_lines[0][0], '\n'.join([l[1] for l in current_notam_lines]).strip()))
+                    current_notam_lines = []
+                continue  # 구분선 라인은 다음 NOTAM에 포함하지 않음
+            
+            # 새로운 NOTAM 시작 감지 (더 정확한 패턴 사용)
+            is_new_notam = False
+            for pattern in new_notam_patterns:
+                if re.match(pattern, line):
+                    is_new_notam = True
+                    break
+            
+            if is_new_notam:
+                # 현재 NOTAM이 있으면 저장하고 새로 시작
+                if current_notam_lines:
+                    notams_with_index.append((current_notam_lines[0][0], '\n'.join([l[1] for l in current_notam_lines]).strip()))
+                current_notam_lines = [(line_num, line)]
+            else:
+                current_notam_lines.append((line_num, line))
+                
+            # 끝 문구 등장 시 강제 끊기
+            if re.search(end_phrase_pattern, line):
+                if current_notam_lines:
+                    notams_with_index.append((current_notam_lines[0][0], '\n'.join([l[1] for l in current_notam_lines]).strip()))
+                    current_notam_lines = []
+                
+        if current_notam_lines:
+            notams_with_index.append((current_notam_lines[0][0], '\n'.join([l[1] for l in current_notam_lines]).strip()))
+        
+        # 줄번호 순으로 정렬하여 원본 텍스트 순서 엄격히 유지
+        notams_with_index.sort(key=lambda x: x[0])
+        
+        # 로깅으로 순서 확인 (디버깅용)
+        self.logger.info("=== 원본 텍스트 파일 순서로 NOTAM 정렬 ===")
+        for i, (line_num, notam_text) in enumerate(notams_with_index[:10], 1):  # 첫 10개만 로깅
+            coad_match = re.search(r'COAD\d+/\d+', notam_text)
+            coad_number = coad_match.group(0) if coad_match else "N/A"
+            notam_type = "RKSI" if "RKSI" in notam_text else ""
+            self.logger.info(f"줄 {line_num}: NOTAM {i} -> {notam_type} {coad_number}")
+            
+        return [notam_text for _, notam_text in notams_with_index]

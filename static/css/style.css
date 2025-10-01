@@ -532,6 +532,13 @@ code {
     max-height: 200px;
 }
 
+/* 줄바꿈 유지 스타일 */
+.preserve-linebreaks {
+    white-space: pre-line !important;
+    word-wrap: break-word;
+    line-height: 1.6;
+}
+
 /* 반응형 개선 */
 @media (max-width: 768px) {
     .time-filter-controls {

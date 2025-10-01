@@ -173,4 +173,4 @@ sample_data/
 cache/
 
 # 세션 파일
-flask_session/
+flask_session/SmartNOTAMgemini_GCR/

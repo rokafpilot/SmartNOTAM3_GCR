@@ -53,7 +53,7 @@
                                 </div>
                             </div>
                             
-                            <div class="row">
+                            {# <div class="row">
                                 <div class="col-md-12">
                                     <div class="form-check">
                                         <input class="form-check-input" type="checkbox" id="includeCoords" name="includeCoords" checked>
@@ -62,13 +62,23 @@
                                         </label>
                                     </div>
                                 </div>
-                            </div>
+                            </div> #}
                             
                             <div class="d-grid gap-2 mt-3">
-                                <button type="submit" class="btn btn-primary btn-lg">
-                                    <i class="fas fa-upload me-2"></i>
-                                    NOTAM 처리 시작
-                                </button>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <button type="submit" class="btn btn-primary btn-lg w-100">
+                                            <i class="fas fa-upload me-2"></i>
+                                            새 파일 업로드
+                                        </button>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <button type="button" class="btn btn-success btn-lg w-100" onclick="openGoogleMaps()">
+                                            <i class="fas fa-map-marked-alt me-2"></i>
+                                            구글지도
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </form>
                     </div>
@@ -185,15 +195,144 @@
         </div>
     </footer>
 
-    <div id="loadingModal" class="modal fade" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+    <div id="loadingModal" class="modal fade" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content">
-                <div class="modal-body text-center">
-                    <div class="spinner-border text-primary mb-3" role="status">
-                        <span class="visually-hidden">Loading...</span>
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-cog fa-spin me-2"></i>
+                        NOTAM 처리 진행상황
+                    </h5>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div id="progressSteps">
+                                <div class="step-item mb-3" data-step="file_save">
+                                    <div class="d-flex align-items-center">
+                                        <div class="step-icon me-3">
+                                            <i class="fas fa-save text-muted"></i>
+                                        </div>
+                                        <div class="flex-grow-1">
+                                            <h6 class="mb-1">파일 저장</h6>
+                                            <small class="text-muted">PDF 파일을 서버에 저장하는 중...</small>
+                                        </div>
+                                        <div class="step-status">
+                                            <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                                <span class="visually-hidden">Loading...</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="step-item mb-3" data-step="pdf_conversion">
+                                    <div class="d-flex align-items-center">
+                                        <div class="step-icon me-3">
+                                            <i class="fas fa-file-alt text-muted"></i>
+                                        </div>
+                                        <div class="flex-grow-1">
+                                            <h6 class="mb-1">PDF 텍스트 변환</h6>
+                                            <small class="text-muted">PDF에서 텍스트를 추출하는 중...</small>
+                                        </div>
+                                        <div class="step-status">
+                                            <div class="spinner-border spinner-border-sm text-muted" role="status">
+                                                <span class="visually-hidden">Loading...</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="step-item mb-3" data-step="notam_filtering">
+                                    <div class="d-flex align-items-center">
+                                        <div class="step-icon me-3">
+                                            <i class="fas fa-filter text-muted"></i>
+                                        </div>
+                                        <div class="flex-grow-1">
+                                            <h6 class="mb-1">NOTAM 필터링</h6>
+                                            <small class="text-muted">대한항공 관련 NOTAM을 추출하는 중...</small>
+                                        </div>
+                                        <div class="step-status">
+                                            <div class="spinner-border spinner-border-sm text-muted" role="status">
+                                                <span class="visually-hidden">Loading...</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="step-item mb-3" data-step="airport_filtering">
+                                    <div class="d-flex align-items-center">
+                                        <div class="step-icon me-3">
+                                            <i class="fas fa-map-marker-alt text-muted"></i>
+                                        </div>
+                                        <div class="flex-grow-1">
+                                            <h6 class="mb-1">공항 필터링</h6>
+                                            <small class="text-muted">공항별 NOTAM을 분류하는 중...</small>
+                                        </div>
+                                        <div class="step-status">
+                                            <div class="spinner-border spinner-border-sm text-muted" role="status">
+                                                <span class="visually-hidden">Loading...</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="step-item mb-3" data-step="time_conversion">
+                                    <div class="d-flex align-items-center">
+                                        <div class="step-icon me-3">
+                                            <i class="fas fa-clock text-muted"></i>
+                                        </div>
+                                        <div class="flex-grow-1">
+                                            <h6 class="mb-1">시간 변환</h6>
+                                            <small class="text-muted">UTC 시간을 로컬 시간으로 변환하는 중...</small>
+                                        </div>
+                                        <div class="step-status">
+                                            <div class="spinner-border spinner-border-sm text-muted" role="status">
+                                                <span class="visually-hidden">Loading...</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="step-item mb-3" data-step="translation">
+                                    <div class="d-flex align-items-center">
+                                        <div class="step-icon me-3">
+                                            <i class="fas fa-language text-muted"></i>
+                                        </div>
+                                        <div class="flex-grow-1">
+                                            <h6 class="mb-1">번역 처리</h6>
+                                            <small class="text-muted">AI를 사용하여 한국어로 번역하는 중...</small>
+                                        </div>
+                                        <div class="step-status">
+                                            <div class="spinner-border spinner-border-sm text-muted" role="status">
+                                                <span class="visually-hidden">Loading...</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card bg-light">
+                                <div class="card-body text-center">
+                                    <h6 class="card-title">처리 통계</h6>
+                                    <div class="mb-2">
+                                        <small class="text-muted">경과 시간</small>
+                                        <div class="h5 text-primary" id="elapsedTime">00:00</div>
+                                    </div>
+                                    <div class="mb-2">
+                                        <small class="text-muted">예상 남은 시간</small>
+                                        <div class="h6 text-success" id="estimatedTime">계산 중...</div>
+                                    </div>
+                                    <div class="progress mb-2" style="height: 8px;">
+                                        <div class="progress-bar" role="progressbar" id="overallProgress" 
+                                             style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                                        </div>
+                                    </div>
+                                    <small class="text-muted" id="progressText">처리 준비 중...</small>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <h5>NOTAM 처리 중...</h5>
-                    <p class="text-muted">PDF 변환, 필터링, 번역 작업을 진행하고 있습니다.</p>
                 </div>
             </div>
         </div>
@@ -203,6 +342,100 @@
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     
     <script>
+        // 진행상황 관리 변수
+        let startTime = null;
+        let progressInterval = null;
+        let currentStep = 0;
+        const steps = ['file_save', 'pdf_conversion', 'notam_filtering', 'airport_filtering', 'time_conversion', 'translation'];
+        const stepNames = {
+            'file_save': '파일 저장',
+            'pdf_conversion': 'PDF 텍스트 변환',
+            'notam_filtering': 'NOTAM 필터링',
+            'airport_filtering': '공항 필터링',
+            'time_conversion': '시간 변환',
+            'translation': '번역 처리'
+        };
+        
+        // 진행상황 업데이트 함수
+        function updateProgress(stepName, status = 'active') {
+            const stepElement = document.querySelector(`[data-step="${stepName}"]`);
+            if (!stepElement) return;
+            
+            const icon = stepElement.querySelector('.step-icon i');
+            const statusDiv = stepElement.querySelector('.step-status');
+            
+            // 모든 단계를 비활성화
+            document.querySelectorAll('.step-item').forEach(item => {
+                const itemIcon = item.querySelector('.step-icon i');
+                const itemStatus = item.querySelector('.step-status');
+                itemIcon.className = 'fas fa-circle text-muted';
+                itemStatus.innerHTML = '<div class="spinner-border spinner-border-sm text-muted" role="status"><span class="visually-hidden">Loading...</span></div>';
+            });
+            
+            // 현재 단계 활성화
+            if (status === 'active') {
+                icon.className = 'fas fa-circle text-primary';
+                statusDiv.innerHTML = '<div class="spinner-border spinner-border-sm text-primary" role="status"><span class="visually-hidden">Loading...</span></div>';
+            } else if (status === 'completed') {
+                icon.className = 'fas fa-check-circle text-success';
+                statusDiv.innerHTML = '<i class="fas fa-check text-success"></i>';
+            } else if (status === 'error') {
+                icon.className = 'fas fa-exclamation-circle text-danger';
+                statusDiv.innerHTML = '<i class="fas fa-times text-danger"></i>';
+            }
+            
+            // 전체 진행률 업데이트
+            const stepIndex = steps.indexOf(stepName);
+            const progress = ((stepIndex + 1) / steps.length) * 100;
+            document.getElementById('overallProgress').style.width = progress + '%';
+            document.getElementById('overallProgress').setAttribute('aria-valuenow', progress);
+            document.getElementById('progressText').textContent = `${stepNames[stepName]} 중...`;
+        }
+        
+        // 경과 시간 업데이트
+        function updateElapsedTime() {
+            if (!startTime) return;
+            
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            
+            document.getElementById('elapsedTime').textContent = 
+                `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            
+            // 예상 남은 시간 계산 (개선된 추정)
+            if (elapsed < 15) {  // 15초 이내는 일반적인 처리 시간
+                const estimatedTotal = 15;  // 평균 처리 시간 15초
+                const remaining = Math.max(0, estimatedTotal - elapsed);
+                
+                if (remaining > 0) {
+                    const estMinutes = Math.floor(remaining / 60);
+                    const estSeconds = remaining % 60;
+                    document.getElementById('estimatedTime').textContent = 
+                        `${estMinutes.toString().padStart(2, '0')}:${estSeconds.toString().padStart(2, '0')}`;
+                } else {
+                    document.getElementById('estimatedTime').textContent = '거의 완료';
+                }
+            } else {
+                // 15초 초과 시 동적 계산
+                const avgTimePerStep = elapsed / (currentStep + 1);
+                const remainingSteps = steps.length - currentStep - 1;
+                const estimatedRemaining = Math.floor(avgTimePerStep * remainingSteps);
+                
+                if (estimatedRemaining > 0) {
+                    const estMinutes = Math.floor(estimatedRemaining / 60);
+                    const estSeconds = estimatedRemaining % 60;
+                    document.getElementById('estimatedTime').textContent = 
+                        `${estMinutes.toString().padStart(2, '0')}:${estSeconds.toString().padStart(2, '0')}`;
+                } else {
+                    document.getElementById('estimatedTime').textContent = '거의 완료';
+                }
+            }
+            
+            // 처리 상태 업데이트
+            updateProcessingStatus();
+        }
+        
         // 파일 선택시 공항 코드 미리 추출 (정보 표시용)
         async function extractAirportsFromFile(file) {
             if (!file) return;
@@ -258,7 +491,73 @@
                     extractAirportsFromFile(file);
                 }
             });
+            
+            // 폼 제출 이벤트 - 진행상황 모달 표시
+            document.getElementById('uploadForm').addEventListener('submit', function(e) {
+                // 진행상황 초기화
+                startTime = Date.now();
+                currentStep = 0;
+                
+                // 모든 단계를 대기 상태로 설정
+                document.querySelectorAll('.step-item').forEach(item => {
+                    const itemIcon = item.querySelector('.step-icon i');
+                    const itemStatus = item.querySelector('.step-status');
+                    itemIcon.className = 'fas fa-circle text-muted';
+                    itemStatus.innerHTML = '<div class="spinner-border spinner-border-sm text-muted" role="status"><span class="visually-hidden">Loading...</span></div>';
+                });
+                
+                // 첫 번째 단계 활성화
+                updateProgress(steps[0], 'active');
+                
+                // 경과 시간 업데이트 시작
+                progressInterval = setInterval(updateElapsedTime, 1000);
+                
+                // 모달 표시
+                const modal = new bootstrap.Modal(document.getElementById('loadingModal'));
+                modal.show();
+                
+                // 실제 처리 상태 표시
+                document.getElementById('progressText').textContent = '파일 업로드 및 처리 중...';
+            });
         });
+        
+        // 처리 상태 업데이트 (실제 처리 시간 기반)
+        function updateProcessingStatus() {
+            if (!startTime) return;
+            
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            
+            // 처리 단계별 상태 업데이트 (실제 시간 기반)
+            if (elapsed < 1) {
+                updateProgress('file_save', 'active');
+                document.getElementById('progressText').textContent = '파일 저장 중...';
+            } else if (elapsed < 3) {
+                updateProgress('file_save', 'completed');
+                updateProgress('pdf_conversion', 'active');
+                document.getElementById('progressText').textContent = 'PDF 텍스트 변환 중...';
+            } else if (elapsed < 6) {
+                updateProgress('pdf_conversion', 'completed');
+                updateProgress('notam_filtering', 'active');
+                document.getElementById('progressText').textContent = 'NOTAM 필터링 중...';
+            } else if (elapsed < 8) {
+                updateProgress('notam_filtering', 'completed');
+                updateProgress('airport_filtering', 'active');
+                document.getElementById('progressText').textContent = '공항 필터링 중...';
+            } else if (elapsed < 10) {
+                updateProgress('airport_filtering', 'completed');
+                updateProgress('time_conversion', 'active');
+                document.getElementById('progressText').textContent = '시간 변환 중...';
+            } else {
+                updateProgress('time_conversion', 'completed');
+                updateProgress('translation', 'active');
+                document.getElementById('progressText').textContent = '번역 처리 중...';
+            }
+        }
+
+        // 구글지도 새 창 열기
+        function openGoogleMaps() {
+            window.open('/google_maps', '_blank', 'width=1200,height=800,scrollbars=yes,resizable=yes');
+        }
     </script>
 </body>
 </html>

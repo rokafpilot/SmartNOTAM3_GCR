@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>구글지도 - Smart NOTAM</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #f8f9fa;
+            padding-top: 2rem;
+        }
+        .container {
+            max-width: 1200px;
+        }
+        .card {
+            margin-bottom: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .map-container {
+            width: 100%;
+            height: 500px;
+            margin-top: 20px;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            overflow: hidden;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        .coordinates-input {
+            margin-bottom: 1rem;
+        }
+        .alert {
+            display: none;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="mb-0">
+                <i class="fas fa-map-marked-alt me-2"></i>
+                구글지도
+            </h1>
+            <button class="btn btn-secondary" onclick="window.close()">
+                <i class="fas fa-times me-2"></i>
+                닫기
+            </button>
+        </div>
+        
+        <!-- 공항 입력 섹션 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">공항 입력</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="airport-input">
+                            <label for="airportCode" class="form-label">공항 코드 (전세계 공항 지원, 예: RKSI, LAX, JFK, LHR)</label>
+                            <div class="input-group">
+                                <input type="text" id="airportCode" class="form-control" placeholder="전세계 공항 코드 입력 (예: RKSI, LAX, JFK, LHR)" list="airportList" style="text-transform: uppercase;">
+                                <datalist id="airportList">
+                                    <!-- 한국 -->
+                                    <option value="RKSI">인천국제공항</option>
+                                    <option value="RKPC">제주국제공항</option>
+                                    <option value="RKRR">김해국제공항</option>
+                                    <option value="RKSS">김포공항</option>
+                                    
+                                    <!-- 일본 -->
+                                    <option value="RJFF">후쿠오카공항</option>
+                                    <option value="RJJJ">나리타국제공항</option>
+                                    <option value="RJTT">하네다공항</option>
+                                    <option value="RJGG">주부센트레아국제공항</option>
+                                    <option value="RJCC">신치토세공항</option>
+                                    <option value="RJBB">간사이국제공항</option>
+                                    <option value="ROAH">나하공항</option>
+                                    
+                                    <!-- 대만 -->
+                                    <option value="RCTP">타이완 타오위안 국제공항</option>
+                                    <option value="RCAA">타이베이 송산공항</option>
+                                    
+                                    <!-- 홍콩 -->
+                                    <option value="VHHH">홍콩국제공항</option>
+                                    <option value="VHHK">홍콩 헬리포트</option>
+                                    
+                                    <!-- 베트남 -->
+                                    <option value="VVCR">호치민시 국제공항</option>
+                                    <option value="VVDN">다낭국제공항</option>
+                                    <option value="VVHM">하이퐁공항</option>
+                                    <option value="VVHN">노이바이국제공항</option>
+                                    <option value="VVTS">떤선녓국제공항</option>
+                                    
+                                    <!-- 중국 -->
+                                    <option value="ZJSA">청도류팅국제공항</option>
+                                    <option value="ZJSY">산야펀하이공항</option>
+                                    <option value="ZBAA">베이징 수도국제공항</option>
+                                    <option value="ZSPD">상하이 푸동국제공항</option>
+                                    <option value="ZGGG">광저우 바이윈국제공항</option>
+                                    
+                                    <!-- 미국 -->
+                                    <option value="KLAX">로스앤젤레스국제공항</option>
+                                    <option value="KJFK">존 F. 케네디국제공항</option>
+                                    <option value="KORD">시카고 오헤어국제공항</option>
+                                    <option value="KDFW">댈러스 포트워스국제공항</option>
+                                    <option value="KATL">애틀랜타 하츠필드잭슨국제공항</option>
+                                    <option value="KSFO">샌프란시스코국제공항</option>
+                                    <option value="KSEA">시애틀 타코마국제공항</option>
+                                    
+                                    <!-- 유럽 -->
+                                    <option value="EGLL">런던 히드로공항</option>
+                                    <option value="EGKK">런던 개트윅공항</option>
+                                    <option value="LFPG">파리 샤를 드 골공항</option>
+                                    <option value="EDDF">프랑크푸르트공항</option>
+                                    <option value="EHAM">암스테르담 스키폴공항</option>
+                                    <option value="LEMD">마드리드 바라하스공항</option>
+                                    <option value="LIRF">로마 피우미치노공항</option>
+                                    
+                                    <!-- 기타 주요 공항 -->
+                                    <option value="YSSY">시드니 킹스포드스미스공항</option>
+                                    <option value="YMML">멜버른공항</option>
+                                    <option value="OMDB">두바이국제공항</option>
+                                    <option value="OTHH">도하 하마드국제공항</option>
+                                    <option value="VIDP">델리 인디라 간디국제공항</option>
+                                    <option value="VABB">뭄바이 차트라파티 시바지공항</option>
+                                    <option value="SBGR">상파울루 구아룰류스공항</option>
+                                    <option value="SAEZ">부에노스아이레스 에세이사공항</option>
+                                </datalist>
+                                <button class="btn btn-success" onclick="showAirportOnMap()">공항 중심으로 이동</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 좌표 입력 섹션 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">좌표 입력</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="coordinates-input">
+                            <label for="coordinates" class="form-label">좌표 (예: 372850.8N1262507.5E-372851.7N1262509.1E)</label>
+                            <textarea id="coordinates" class="form-control" rows="4" placeholder="좌표를 입력하세요"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="coordinates-input">
+                            <label for="radius" class="form-label">반경</label>
+                            <div class="input-group">
+                                <input type="number" id="radius" class="form-control" placeholder="반경을 입력하세요">
+                                <div class="btn-group ms-2" role="group">
+                                    <input type="radio" class="btn-check" name="radiusUnit" id="kmUnit" value="km" checked>
+                                    <label class="btn btn-outline-primary" for="kmUnit">km</label>
+                                    
+                                    <input type="radio" class="btn-check" name="radiusUnit" id="nmUnit" value="nm">
+                                    <label class="btn btn-outline-primary" for="nmUnit">NM</label>
+                                </div>
+                                <button class="btn btn-primary ms-2" onclick="showOnMap()">지도에 표시</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+            
+        <!-- 구글 맵 섹션 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">위치 정보</h5>
+            </div>
+            <div class="card-body">
+                <div class="map-container">
+                    <div id="map"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 알림 메시지 -->
+        <div id="alertMessage" class="alert" role="alert"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        "use strict";
+        
+        let map;
+        let marker;
+        let polygon;
+        let circle;
+
+        // 주요 공항 좌표 데이터 (빠른 접근을 위한 로컬 캐시)
+        const airportCoordinates = {
+            // 한국
+            'RKSI': { lat: 37.4692, lng: 126.4505, name: '인천국제공항' },
+            'RKPC': { lat: 33.5113, lng: 126.4930, name: '제주국제공항' },
+            'RKRR': { lat: 35.1796, lng: 128.9382, name: '김해국제공항' },
+            'RKSS': { lat: 37.5583, lng: 126.7906, name: '김포공항' },
+            
+            // 일본
+            'RJFF': { lat: 33.5859, lng: 130.4511, name: '후쿠오카공항' },
+            'RJJJ': { lat: 35.7720, lng: 140.3928, name: '나리타국제공항' },
+            'RJTT': { lat: 35.5494, lng: 139.7798, name: '하네다공항' },
+            'RJGG': { lat: 35.2551, lng: 136.9241, name: '주부센트레아국제공항' },
+            'RJCC': { lat: 43.0642, lng: 141.3469, name: '신치토세공항' },
+            'RJBB': { lat: 34.4273, lng: 135.2441, name: '간사이국제공항' },
+            'ROAH': { lat: 26.1958, lng: 127.6456, name: '나하공항' },
+            
+            // 대만
+            'RCTP': { lat: 25.0777, lng: 121.2328, name: '타이완 타오위안 국제공항' },
+            'RCAA': { lat: 25.0697, lng: 121.5519, name: '타이베이 송산공항' },
+            
+            // 홍콩
+            'VHHH': { lat: 22.3089, lng: 113.9146, name: '홍콩국제공항' },
+            'VHHK': { lat: 22.3154, lng: 114.1955, name: '홍콩 헬리포트' },
+            
+            // 베트남
+            'VVCR': { lat: 10.8189, lng: 106.6519, name: '호치민시 국제공항' },
+            'VVDN': { lat: 16.0439, lng: 108.1994, name: '다낭국제공항' },
+            'VVHM': { lat: 20.8194, lng: 106.7249, name: '하이퐁공항' },
+            'VVHN': { lat: 21.2212, lng: 105.8072, name: '노이바이국제공항' },
+            'VVTS': { lat: 10.8189, lng: 106.6519, name: '떤선녓국제공항' },
+            
+            // 중국
+            'ZJSA': { lat: 36.2661, lng: 120.3744, name: '청도류팅국제공항' },
+            'ZJSY': { lat: 18.3029, lng: 109.4122, name: '산야펀하이공항' },
+            'ZBAA': { lat: 40.0801, lng: 116.5846, name: '베이징 수도국제공항' },
+            'ZSPD': { lat: 31.1434, lng: 121.8052, name: '상하이 푸동국제공항' },
+            'ZGGG': { lat: 23.3924, lng: 113.2988, name: '광저우 바이윈국제공항' },
+            
+            // 미국
+            'KLAX': { lat: 33.9425, lng: -118.4081, name: '로스앤젤레스국제공항' },
+            'KJFK': { lat: 40.6413, lng: -73.7781, name: '존 F. 케네디국제공항' },
+            'KORD': { lat: 41.9786, lng: -87.9048, name: '시카고 오헤어국제공항' },
+            'KDFW': { lat: 32.8968, lng: -97.0380, name: '댈러스 포트워스국제공항' },
+            'KATL': { lat: 33.6407, lng: -84.4277, name: '애틀랜타 하츠필드잭슨국제공항' },
+            'KSFO': { lat: 37.6213, lng: -122.3790, name: '샌프란시스코국제공항' },
+            'KSEA': { lat: 47.4502, lng: -122.3088, name: '시애틀 타코마국제공항' },
+            
+            // 유럽
+            'EGLL': { lat: 51.4700, lng: -0.4543, name: '런던 히드로공항' },
+            'EGKK': { lat: 51.1481, lng: -0.1903, name: '런던 개트윅공항' },
+            'LFPG': { lat: 49.0097, lng: 2.5479, name: '파리 샤를 드 골공항' },
+            'EDDF': { lat: 50.0379, lng: 8.5622, name: '프랑크푸르트공항' },
+            'EHAM': { lat: 52.3105, lng: 4.7683, name: '암스테르담 스키폴공항' },
+            'LEMD': { lat: 40.4839, lng: -3.5680, name: '마드리드 바라하스공항' },
+            'LIRF': { lat: 41.8003, lng: 12.2389, name: '로마 피우미치노공항' },
+            
+            // 기타 주요 공항
+            'YSSY': { lat: -33.9399, lng: 151.1753, name: '시드니 킹스포드스미스공항' },
+            'YMML': { lat: -37.6733, lng: 144.8433, name: '멜버른공항' },
+            'OMDB': { lat: 25.2532, lng: 55.3657, name: '두바이국제공항' },
+            'OTHH': { lat: 25.2731, lng: 51.6081, name: '도하 하마드국제공항' },
+            'VIDP': { lat: 28.5562, lng: 77.1000, name: '델리 인디라 간디국제공항' },
+            'VABB': { lat: 19.0887, lng: 72.8679, name: '뭄바이 차트라파티 시바지공항' },
+            'SBGR': { lat: -23.4356, lng: -46.4731, name: '상파울루 구아룰류스공항' },
+            'SAEZ': { lat: -34.8222, lng: -58.5358, name: '부에노스아이레스 에세이사공항' }
+        };
+
+        // Google Maps API 초기화
+        async function initMap() {
+            try {
+                const { Map } = await google.maps.importLibrary("maps");
+                const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+
+                map = new Map(document.getElementById('map'), {
+                    center: { lat: 37.4692, lng: 126.4505 },  // 인천공항(RKSI) 중심
+                    zoom: 12,
+                    mapTypeId: google.maps.MapTypeId.SATELLITE,
+                    mapId: "DEMO_MAP_ID",  // Map ID 추가
+                    scrollwheel: true,  // 마우스 스크롤 줌 활성화
+                    gestureHandling: 'greedy'  // 스크롤 동작을 더 자연스럽게 처리
+                });
+
+            } catch (error) {
+                console.error('지도 초기화 오류:', error);
+                showAlert('지도 초기화 중 오류가 발생했습니다.');
+            }
+        }
+
+        // 페이지 로드 시 초기화
+        window.addEventListener('load', () => {
+            initMap();
+            
+            // 공항 코드 입력 필드에 실시간 대문자 변환 기능 추가
+            const airportCodeInput = document.getElementById('airportCode');
+            airportCodeInput.addEventListener('input', function() {
+                this.value = this.value.toUpperCase();
+            });
+        });
+
+        // Google Maps API 로드
+        (g=>{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{await (a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src=`https://maps.${c}apis.com/maps/api/js?`+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}));d[l]?console.warn(p+" only loads once. Ignoring:"+g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))})({
+            key: "AIzaSyAlECWLGEUGJ8uIqFpYhD8_8Omai-mWP9g",
+            v: "beta",
+            libraries: ["places", "marker"],
+            callback: initMap
+        });
+
+        // 알림 메시지 표시 함수
+        function showAlert(message, type = 'danger') {
+            const alert = document.getElementById('alertMessage');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alert.style.display = 'block';
+            setTimeout(() => {
+                alert.style.display = 'none';
+            }, 5000);
+        }
+
+        // 공항 중심으로 지도 이동 함수
+        async function showAirportOnMap() {
+            try {
+                const airportCode = document.getElementById('airportCode').value.trim().toUpperCase();
+                
+                if (!airportCode) {
+                    showAlert('공항 코드를 입력해주세요.');
+                    return;
+                }
+
+                // 로딩 상태 표시
+                showAlert(`${airportCode} 공항을 검색 중입니다...`, 'info');
+
+                // 먼저 로컬 데이터에서 검색
+                let airport = airportCoordinates[airportCode];
+                
+                // 로컬 데이터에 없으면 구글 Places API로 검색
+                if (!airport) {
+                    showAlert(`로컬 데이터에 없어서 구글에서 ${airportCode} 공항을 검색 중입니다...`, 'info');
+                    airport = await searchAirportWithPlacesAPI(airportCode);
+                }
+
+                if (!airport) {
+                    showAlert(`공항 코드 '${airportCode}'를 찾을 수 없습니다. 전세계 공항을 검색했지만 결과가 없습니다.`);
+                    return;
+                }
+
+                // 기존 요소 제거
+                if (polygon) polygon.setMap(null);
+                if (circle) circle.setMap(null);
+                if (marker) marker.map = null;
+
+                // 공항 위치에 마커 표시
+                const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+                marker = new AdvancedMarkerElement({
+                    map,
+                    position: { lat: airport.lat, lng: airport.lng },
+                    title: `${airportCode} - ${airport.name}`
+                });
+
+                // 지도 중심을 공항으로 이동
+                map.setCenter({ lat: airport.lat, lng: airport.lng });
+                map.setZoom(13);
+
+                showAlert(`${airportCode} - ${airport.name}로 이동했습니다.`, 'success');
+
+            } catch (error) {
+                showAlert('공항 정보를 불러오는 중 오류가 발생했습니다: ' + error.message);
+                console.error('Error:', error);
+            }
+        }
+
+        // 구글 Places API를 사용한 공항 검색 함수
+        async function searchAirportWithPlacesAPI(airportCode) {
+            try {
+                const { PlacesService } = await google.maps.importLibrary("places");
+                
+                // PlacesService는 지도가 필요하므로 임시로 사용
+                const service = new PlacesService(map);
+                
+                return new Promise((resolve, reject) => {
+                    const request = {
+                        query: `${airportCode} airport`,
+                        fields: ['name', 'geometry', 'formatted_address'],
+                        locationBias: map.getCenter()
+                    };
+
+                    service.textSearch(request, (results, status) => {
+                        if (status === google.maps.places.PlacesServiceStatus.OK && results.length > 0) {
+                            const place = results[0];
+                            resolve({
+                                lat: place.geometry.location.lat(),
+                                lng: place.geometry.location.lng(),
+                                name: place.name,
+                                address: place.formatted_address
+                            });
+                        } else {
+                            // 공항 코드만으로 검색해보기
+                            const airportRequest = {
+                                query: airportCode,
+                                fields: ['name', 'geometry', 'formatted_address'],
+                                locationBias: map.getCenter()
+                            };
+
+                            service.textSearch(airportRequest, (airportResults, airportStatus) => {
+                                if (airportStatus === google.maps.places.PlacesServiceStatus.OK && airportResults.length > 0) {
+                                    const place = airportResults[0];
+                                    resolve({
+                                        lat: place.geometry.location.lat(),
+                                        lng: place.geometry.location.lng(),
+                                        name: place.name,
+                                        address: place.formatted_address
+                                    });
+                                } else {
+                                    resolve(null);
+                                }
+                            });
+                        }
+                    });
+                });
+            } catch (error) {
+                console.error('Places API 검색 오류:', error);
+                return null;
+            }
+        }
+
+        // 좌표 파싱 함수
+        function parseCoordinate(coord) {
+            try {
+                let latitude, longitude;
+                
+                // 새로운 형식: 372617N1262745E 또는 37261 0N1262741E (공백 포함 가능)
+                // 먼저 공백을 제거한 후 파싱
+                let cleanCoord = coord.replace(/\s+/g, '');
+                let match = cleanCoord.match(/(\d{2})(\d{2})(\d{2}(?:\.\d+)?)([NS])(\d{2,3})(\d{2})(\d{2}(?:\.\d+)?)([EW])/);
+                if (match) {
+                    const [_, latDeg, latMin, latSec, latDir, lngDeg, lngMin, lngSec, lngDir] = match;
+                    latitude = parseInt(latDeg) + parseInt(latMin)/60 + parseFloat(latSec)/3600;
+                    if (latDir === 'S') latitude = -latitude;
+                    longitude = parseInt(lngDeg) + parseInt(lngMin)/60 + parseFloat(lngSec)/3600;
+                    if (lngDir === 'W') longitude = -longitude;
+                }
+                
+                // 기존 형식들도 지원
+                if (!match) {
+                    match = coord.match(/(\d{2})(\d{2})(\d{2}(?:\.\d+)?)([NS])\s*(\d{2,3})(\d{2})(\d{2}(?:\.\d+)?)([EW])/);
+                    if (!match) {
+                        match = coord.match(/(\d{2})(\d{2})(\d{2})([NS])\s*(\d{2,3})(\d{2})(\d{2})([EW])/);
+                    }
+                    if (match) {
+                        const [_, latDeg, latMin, latSec, latDir, lngDeg, lngMin, lngSec, lngDir] = match;
+                        latitude = parseInt(latDeg) + parseInt(latMin)/60 + parseFloat(latSec)/3600;
+                        if (latDir === 'S') latitude = -latitude;
+                        longitude = parseInt(lngDeg) + parseInt(lngMin)/60 + parseFloat(lngSec)/3600;
+                        if (lngDir === 'W') longitude = -longitude;
+                    }
+                }
+                
+                if (!match) {
+                    match = coord.match(/(\d{2})°(\d{2})'(\d{2})"([NS])\s*(\d{2,3})°(\d{2})'(\d{2})"([EW])/);
+                    if (match) {
+                        const [_, latDeg, latMin, latSec, latDir, lngDeg, lngMin, lngSec, lngDir] = match;
+                        latitude = parseInt(latDeg) + parseInt(latMin)/60 + parseInt(latSec)/3600;
+                        if (latDir === 'S') latitude = -latitude;
+                        longitude = parseInt(lngDeg) + parseInt(lngMin)/60 + parseInt(lngSec)/3600;
+                        if (lngDir === 'W') longitude = -longitude;
+                    }
+                }
+                
+                if (!match) {
+                    match = coord.match(/([NS])\s*(\d{2})°(\d{2})'(\d{2})"\s*([EW])\s*(\d{2,3})°(\d{2})'(\d{2})"/);
+                    if (match) {
+                        const [_, latDir, latDeg, latMin, latSec, lngDir, lngDeg, lngMin, lngSec] = match;
+                        latitude = parseInt(latDeg) + parseInt(latMin)/60 + parseInt(latSec)/3600;
+                        if (latDir === 'S') latitude = -latitude;
+                        longitude = parseInt(lngDeg) + parseInt(lngMin)/60 + parseInt(lngSec)/3600;
+                        if (lngDir === 'W') longitude = -longitude;
+                    }
+                }
+                
+                if (!match) {
+                    throw new Error('지원되지 않는 좌표 형식');
+                }
+                
+                console.log('Parsed coordinate:', { lat: latitude, lng: longitude });
+                return { lat: latitude, lng: longitude };
+            } catch (error) {
+                console.error('좌표 파싱 오류:', error);
+                throw new Error(`좌표 파싱 오류: ${coord}`);
+            }
+        }
+
+        // 지도에 좌표 표시 함수
+        async function showOnMap() {
+            try {
+                const coordsText = document.getElementById('coordinates').value.trim();
+                const radius = parseFloat(document.getElementById('radius').value);
+                const radiusUnit = document.querySelector('input[name="radiusUnit"]:checked').value;
+
+                if (!coordsText) {
+                    showAlert('좌표를 입력해주세요.');
+                    return;
+                }
+
+                // 기존 요소 제거
+                if (polygon) polygon.setMap(null);
+                if (circle) circle.setMap(null);
+                if (marker) marker.map = null;
+
+                const coordPairs = coordsText
+                    .split(/[\n-]/)
+                    .map(coord => coord.trim())
+                    .filter(coord => coord.length > 0);
+
+                console.log('Coordinates to process:', coordPairs);
+                const coordinates = coordPairs.map(coord => parseCoordinate(coord));
+                console.log('Processed coordinates:', coordinates);
+
+                // 좌표가 하나만 있는 경우 마커만 표시
+                if (coordinates.length === 1) {
+                    const position = coordinates[0];
+                    const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+                    marker = new AdvancedMarkerElement({
+                        map,
+                        position: position,
+                        title: '선택된 위치'
+                    });
+
+                    // 지도 중심 이동
+                    map.setCenter(position);
+                    map.setZoom(12);
+
+                    // 반경이 입력된 경우 원형 영역 표시
+                    if (!isNaN(radius) && radius > 0) {
+                        const radiusInMeters = radiusUnit === 'nm' ? radius * 1852 : radius * 1000;
+                        circle = new google.maps.Circle({
+                            map: map,
+                            center: position,
+                            radius: radiusInMeters,
+                            fillColor: '#FF0000',
+                            fillOpacity: 0.2,
+                            strokeColor: '#FF0000',
+                            strokeOpacity: 0.8,
+                            strokeWeight: 2,
+                        });
+                    }
+                    return;
+                }
+
+                // 여러 좌표가 있는 경우 폴리곤 표시
+                polygon = new google.maps.Polygon({
+                    paths: coordinates,
+                    strokeColor: '#FF0000',
+                    strokeOpacity: 0.8,
+                    strokeWeight: 2,
+                    fillColor: '#FF0000',
+                    fillOpacity: 0.35
+                });
+                polygon.setMap(map);
+
+                const bounds = new google.maps.LatLngBounds();
+                coordinates.forEach(coord => bounds.extend(coord));
+                map.fitBounds(bounds);
+
+                google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
+                    if (map.getZoom() > 17) {
+                        map.setZoom(17);
+                    }
+                });
+
+                if (!isNaN(radius) && radius > 0) {
+                    const radiusInMeters = radiusUnit === 'nm' ? radius * 1852 : radius * 1000;
+                    circle = new google.maps.Circle({
+                        map: map,
+                        center: bounds.getCenter(),
+                        radius: radiusInMeters,
+                        fillColor: '#FF0000',
+                        fillOpacity: 0.2,
+                        strokeColor: '#FF0000',
+                        strokeOpacity: 0.8,
+                        strokeWeight: 2,
+                    });
+                }
+            } catch (error) {
+                showAlert('좌표 형식이 올바르지 않습니다: ' + error.message);
+                console.error('Error:', error);
+            }
+        }
+    </script>
+</body>
+</html>

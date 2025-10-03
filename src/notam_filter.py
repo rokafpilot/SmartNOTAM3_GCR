@@ -189,7 +189,7 @@ def extract_e_section(notam_text):
         # CREATED: 이후의 텍스트 제거
         e_section = re.sub(r'CREATED:.*$', '', e_section, flags=re.DOTALL).strip()
         return e_section
-    return notam_text
+    return ""  # E 섹션을 찾지 못하면 빈 문자열 반환
 
 def preprocess_notam_text(notam_text):
     """
@@ -1045,6 +1045,7 @@ class NOTAMFilter:
             r'^COAD',
             r'^[A-Z]{4} COAD\d{2}/\d{2}',
             r'^[A-Z]{4}\s*$',  # 공항코드만 단독 등장
+            r'^1\.\s+RUNWAY\s*:',  # "1. RUNWAY :" 패턴 추가
             r'^={4,}$'  # 4개 이상의 등호로만 구성된 줄 (NOTAM 구분선)
         ]
         
@@ -1174,13 +1175,16 @@ class NOTAMFilter:
                 # COAD NOTAM의 경우 E) 필드가 없으므로 전체 섹션을 description으로 사용
                 description = parsed_notam.get('e_field') or section
                 
-                # E 섹션만 추출하여 원문으로 사용
-                e_section = extract_e_section(section)
-                if not e_section:
-                    e_section = description  # E 섹션이 없으면 description 사용
+                # E 섹션만 원문으로 사용 (D 섹션 제외)
+                e_field_content = extract_e_section(section)
+                if not e_field_content:
+                    # E 섹션 추출 실패 시 parsed_notam의 e_field 사용
+                    e_field_content = parsed_notam.get('e_field', '')
+                    if not e_field_content:
+                        e_field_content = description  # 그래도 없으면 description 사용
                 
                 # 원문에도 색상 스타일 적용
-                styled_section = apply_color_styles(e_section)
+                styled_section = apply_color_styles(e_field_content)
                 
                 notam_dict = {
                     'id': parsed_notam.get('notam_number', 'Unknown'),
@@ -1421,6 +1425,16 @@ class NOTAMFilter:
         ]
         
         end_phrase_pattern = r'ANY CHANGE WILL BE NOTIFIED BY NOTAM\.'
+        
+        # 섹션 종료 패턴들
+        section_end_patterns = [
+            r'^\[ALTN\]', r'^\[DEST\]', r'^\[ENRT\]', r'^\[ETC\]', r'^\[INFO\]', r'^\[ROUTE\]', r'^\[WX\]',
+            r'^COAD',
+            r'^[A-Z]{4} COAD\d{2}/\d{2}',
+            r'^[A-Z]{4}\s*$',  # 공항코드만 단독 등장
+            r'^1\.\s+RUNWAY\s*:',  # "1. RUNWAY :" 패턴 추가
+            r'^={4,}$'  # 4개 이상의 등호로만 구성된 줄 (NOTAM 구분선)
+        ]
 
         notams_with_index = []
         current_notam_lines = []
@@ -1432,6 +1446,13 @@ class NOTAMFilter:
                     notams_with_index.append((current_notam_lines[0][0], '\n'.join([l[1] for l in current_notam_lines]).strip()))
                     current_notam_lines = []
                 continue  # 구분선 라인은 다음 NOTAM에 포함하지 않음
+            
+            # 섹션 종료 패턴 감지 ([ALTN], "1. RUNWAY :" 등)
+            if any(re.match(pattern, line.strip()) for pattern in section_end_patterns):
+                if current_notam_lines:
+                    notams_with_index.append((current_notam_lines[0][0], '\n'.join([l[1] for l in current_notam_lines]).strip()))
+                    current_notam_lines = []
+                continue  # 섹션 종료 라인은 다음 NOTAM에 포함하지 않음
             
             # 새로운 NOTAM 시작 감지 (더 정확한 패턴 사용)
             is_new_notam = False

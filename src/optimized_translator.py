@@ -98,26 +98,13 @@ class OptimizedNOTAMTranslator:
             self.gemini_enabled = False
     
     def extract_e_section(self, notam_text: str) -> str:
-        """NOTAM에서 E 섹션 추출"""
-        # E) 섹션 추출
-        e_pattern = r'E\)\s*(.+?)(?=\n[A-Z]\)|$)'
-        e_match = re.search(e_pattern, notam_text, re.DOTALL | re.IGNORECASE)
-        
-        if e_match:
-            e_content = e_match.group(1).strip()
-            # 불필요한 공백과 줄바꿈 정리
-            e_content = re.sub(r'\s+', ' ', e_content)
-            return e_content
-        
-        # E) 섹션이 없는 경우 전체 텍스트를 E 섹션으로 간주
-        # 단, 너무 짧거나 의미없는 텍스트는 제외
-        cleaned_text = notam_text.strip()
-        if len(cleaned_text) > 10 and not cleaned_text.lower().startswith(('created:', 'notam')):
-            # 불필요한 공백과 줄바꿈 정리
-            cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
-            return cleaned_text
-        
-        return ""
+        """
+        NOTAM에서 E 섹션 추출 (사용하지 않음 - 이미 추출된 original_text 사용)
+        이 함수는 하위 호환성을 위해 유지되지만 실제로는 사용되지 않습니다.
+        """
+        # 더 이상 사용하지 않음 - original_text를 직접 사용
+        logger.warning("extract_e_section 함수가 호출되었지만 사용되지 않습니다. original_text를 직접 사용하세요.")
+        return notam_text.strip()
     
     def create_batch_prompt(self, notams: List[str], target_language: str, include_summary: bool = True) -> str:
         """배치 처리용 프롬프트 생성"""
@@ -204,16 +191,60 @@ class OptimizedNOTAMTranslator:
             lang_instruction = "translate to English"
             summary_instruction = "summarize each NOTAM's key content in one line" if include_summary else ""
             
-            # 영어 번역용 프롬프트
+            # 영어 번역용 프롬프트 (개선된 버전)
             prompt_parts = [
                 f"You are an aviation NOTAM translation expert. Please {lang_instruction} the following NOTAMs.",
                 "",
-                "Instructions:",
-                f"1. {lang_instruction} each NOTAM accurately",
-                "2. Maintain aviation terminology and abbreviations",
-                "3. Keep technical terms, coordinates, frequencies, and measurements unchanged",
-                "4. Preserve original date and time formats",
-                "5. Translate naturally while maintaining technical accuracy",
+                "⚠️ CRITICAL TRANSLATION RULES ⚠️",
+                "1. ALWAYS translate ALL numbered lists completely:",
+                "   - '1. RTE : A593 VIA SADLI' → '1. ROUTE: A593 VIA SADLI'",
+                "   - '2. ACFT : LANDING RKRR' → '2. AIRCRAFT: LANDING RKRR'",
+                "   - '3. PROC : FL330 AT OR BELOW AVBL' → '3. PROCEDURE: FL330 AT OR BELOW AVAILABLE'",
+                "",
+                "2. Handle 'FLOW CTL AS FLW' pattern:",
+                "   - 'FLOW CTL AS FLW' → 'FLOW CONTROL AS FOLLOWING'",
+                "   - Translate ALL subsequent numbered items (1. 2. 3. ...)",
+                "   - DO NOT stop translation at numbered lists",
+                "",
+                "3. NEVER stop translation:",
+                "   - Translate the entire text even if it's long",
+                "   - Translate all numbered lists completely",
+                "   - Handle complex structures fully",
+                "",
+                "4. Expand abbreviations and acronyms to full English words:",
+                "   - 'FLW' → 'FOLLOWING'",
+                "   - 'AS FLW' → 'AS FOLLOWING'",
+                "   - 'FLOW CTL AS FLW' → 'FLOW CONTROL AS FOLLOWING'",
+                "   - 'ACFT' → 'AIRCRAFT'",
+                "   - 'RTE' → 'ROUTE'",
+                "   - 'PROC' → 'PROCEDURE'",
+                "   - 'RMK' → 'REMARK'",
+                "   - 'WIP' → 'WORK IN PROGRESS'",
+                "   - 'CLSD' → 'CLOSED'",
+                "   - 'NML OPS' → 'NORMAL OPERATIONS'",
+                "   - 'AVBL' → 'AVAILABLE'",
+                "   - 'UNAVBL' → 'UNAVAILABLE'",
+                "   - 'NOT AVBL' → 'NOT AVAILABLE'",
+                "   - 'MAINT' → 'MAINTENANCE'",
+                "   - 'U/S' → 'UNSERVICEABLE'",
+                "",
+                "5. Keep the following terms as is (aviation standards):",
+                "   - NOTAM, AIRAC, AIP, SUP, AMDT, WEF, TIL, UTC",
+                "   - GPS, RAIM, PBN, RNAV, RNP",
+                "   - RWY, TWY, APRON, TAXI, SID, STAR, IAP",
+                "   - All coordinates, frequencies, measurements",
+                "   - All dates and times in original format",
+                "   - Airport codes (RKSI, RJJJ, etc.)",
+                "",
+                "6. Translation Example:",
+                "   Original: 'FLOW CTL AS FLW 1. RTE : A593 VIA SADLI 2. ACFT : LANDING RKRR 3. PROC : FL330 AT OR BELOW AVBL'",
+                "   Translation: 'FLOW CONTROL AS FOLLOWING 1. ROUTE: A593 VIA SADLI 2. AIRCRAFT: LANDING RKRR 3. PROCEDURE: FL330 AT OR BELOW AVAILABLE'",
+                "",
+                "7. Improve grammar and sentence structure:",
+                "   - Fix incomplete sentences",
+                "   - Add proper articles (a, an, the)",
+                "   - Use proper verb tenses",
+                "   - Make sentences clear and readable",
             ]
         
         if include_summary:
@@ -395,26 +426,50 @@ Translation:"""
         )
     
     def process_notams_optimized(self, notams_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """최적화된 NOTAM 처리 (배치 + 병렬)"""
+        """
+        최적화된 NOTAM 처리 (배치 + 병렬)
+        
+        주요 변경사항:
+        - E 섹션을 재추출하지 않고 이미 추출된 original_text를 직접 사용
+        - _extract_content_after_notam_number()에서 추출한 원문을 그대로 번역에 활용
+        - HTML 태그만 제거하고 원문 내용은 보존
+        """
         if not notams_data:
             return []
         
         logger.info(f"최적화된 번역 시작: {len(notams_data)}개 NOTAM")
         start_time = time.time()
         
-        # E 섹션 추출
-        e_sections = []
+        # 이미 추출된 원문(original_text) 사용 - E 섹션 재추출하지 않음
+        original_texts = []
         for i, notam in enumerate(notams_data):
-            description = notam.get('description', '')
-            e_section = self.extract_e_section(description)
-            e_sections.append(e_section)
+            # original_text가 있으면 그것을 사용, 없으면 description 사용
+            original_text = notam.get('original_text', notam.get('description', ''))
+            
+            # HTML 태그 제거 (색상 스타일 제거)
+            if original_text:
+                # <span> 태그와 style 속성 제거
+                import re
+                clean_text = re.sub(r'<span[^>]*>', '', original_text)
+                clean_text = re.sub(r'</span>', '', clean_text)
+                clean_text = re.sub(r'<[^>]+>', '', clean_text)  # 기타 HTML 태그 제거
+                clean_text = clean_text.strip()
+            else:
+                clean_text = ''
+            
+            original_texts.append(clean_text)
             
             # 디버깅을 위한 로깅
-            if not e_section:
-                logger.warning(f"NOTAM {i} ({notam.get('notam_number', 'N/A')}): E 섹션 추출 실패")
-                logger.warning(f"원본 description: '{description[:100]}...' (길이: {len(description)})")
+            if not clean_text:
+                logger.warning(f"NOTAM {i} ({notam.get('notam_number', 'N/A')}): 원문 추출 실패")
+                logger.warning(f"original_text: '{original_text[:100]}...' (길이: {len(original_text)})")
+                logger.warning(f"description: '{notam.get('description', '')[:100]}...'")
             else:
-                logger.debug(f"NOTAM {i} ({notam.get('notam_number', 'N/A')}): E 섹션 추출 성공 (길이: {len(e_section)})")
+                logger.debug(f"NOTAM {i} ({notam.get('notam_number', 'N/A')}): 원문 사용 (길이: {len(clean_text)})")
+                logger.debug(f"원문 내용: '{clean_text[:100]}...'")
+        
+        # e_sections를 original_texts로 변경
+        e_sections = original_texts
         
         # 배치로 나누기
         batches = []

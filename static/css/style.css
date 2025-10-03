@@ -398,6 +398,37 @@ code {
 .korean-translation .translation-text {
     font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
     letter-spacing: -0.02em;
+    line-height: 1.0;
+}
+
+/* 한국어 번역 구조화된 섹션 스타일 */
+.korean-translation .translation-text h3,
+.korean-translation .translation-text h4,
+.korean-translation .translation-text strong {
+    color: #0d6efd;
+    font-weight: 600;
+    margin: 0;
+    display: block;
+}
+
+/* 한국어 번역 불릿 포인트 스타일 */
+.korean-translation .translation-text ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.korean-translation .translation-text li {
+    margin: 0;
+    line-height: 1.0;
+}
+
+/* 한국어 번역 굵은 텍스트 스타일 */
+.korean-translation .translation-text strong {
+    color: #198754;
+    font-weight: 700;
+    background-color: rgba(25, 135, 84, 0.1);
+    padding: 2px 4px;
+    border-radius: 3px;
 }
 
 /* 탭 컨텐츠 내부 텍스트 정렬 */
@@ -536,7 +567,53 @@ code {
 .preserve-linebreaks {
     white-space: pre-line !important;
     word-wrap: break-word;
-    line-height: 1.6;
+    line-height: 1.0;
+}
+
+/* 한국어 번역 마크다운 스타일 개선 */
+.korean-translation .translation-text {
+    /* 마크다운 스타일을 HTML로 변환하여 적용 */
+}
+
+.korean-translation .translation-text p {
+    margin: 0;
+    line-height: 1.0;
+    display: block;
+}
+
+.korean-translation .translation-text br {
+    display: block;
+    margin: 0;
+    content: "";
+}
+
+/* 한국어 번역 섹션 헤더 스타일 */
+.korean-translation .translation-text h1,
+.korean-translation .translation-text h2,
+.korean-translation .translation-text h3,
+.korean-translation .translation-text h4 {
+    color: #0d6efd;
+    font-weight: 600;
+    margin: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+/* 한국어 번역 강조 텍스트 */
+.korean-translation .translation-text em {
+    font-style: normal;
+    color: #198754;
+    font-weight: 600;
+}
+
+/* 한국어 번역 코드/용어 스타일 */
+.korean-translation .translation-text code {
+    background-color: #f8f9fa;
+    color: #e83e8c;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-weight: 500;
 }
 
 /* 반응형 개선 */

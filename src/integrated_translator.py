@@ -113,8 +113,8 @@ class IntegratedNOTAMTranslator:
         self.cache_enabled = True
         
         # 처리 설정 (개별 처리 최적화 - notam_translator.py 참조)
-        self.max_workers = 8  # 워커 수 대폭 증가로 개별 처리 속도 향상
-        self.batch_size = 1   # 개별 처리이므로 배치 크기 1로 설정
+        self.max_workers = 3  # 워커 수를 3으로 조정
+        self.batch_size = 3   # 배치 크기를 3으로 조정
         
         self.logger.info("통합 NOTAM 번역기 초기화 완료")
     
@@ -176,9 +176,117 @@ class IntegratedNOTAMTranslator:
         # HTML 태그 중복 방지
         text = re.sub(r'(<span[^>]*>)+', r'\1', text)
         text = re.sub(r'(</span>)+', r'\1', text)
-        text = re.sub(r'\s+', ' ', text)  # 중복 공백 제거
+        # 줄바꿈은 유지하고 중복 공백만 제거
+        text = re.sub(r'[ \t]+', ' ', text)  # 탭과 공백만 제거
         
-        return text.strip()
+        return text
+    
+    def convert_markdown_to_html(self, text: str) -> str:
+        """마크다운 텍스트를 HTML로 변환"""
+        if not text:
+            return text
+        
+        # 줄 단위로 처리
+        lines = text.split('\n')
+        html_lines = []
+        in_list = False
+        in_paragraph = False
+        paragraph_content = []
+        
+        for line in lines:
+            line = line.strip()
+            
+            # 빈 줄 처리 - 단락 종료
+            if not line:
+                if in_paragraph and paragraph_content:
+                    # 단락 내용을 하나로 합치기
+                    combined_content = ' '.join(paragraph_content)
+                    html_lines.append(f'<p>{combined_content}</p>')
+                    paragraph_content = []
+                    in_paragraph = False
+                continue
+            
+            # 불릿 포인트 처리 (*   로 시작하는 줄)
+            if line.startswith('*   '):
+                if in_paragraph and paragraph_content:
+                    # 기존 단락 종료
+                    combined_content = ' '.join(paragraph_content)
+                    html_lines.append(f'<p>{combined_content}</p>')
+                    paragraph_content = []
+                    in_paragraph = False
+                if not in_list:
+                    html_lines.append('<ul>')
+                    in_list = True
+                content = line[4:]  # '*   ' 제거
+                # 내용에서 **굵은 텍스트** 처리
+                content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content)
+                html_lines.append(f'<li>{content}</li>')
+            elif line.startswith('* '):
+                # * 로 시작하는 줄도 불릿 포인트로 처리
+                if in_paragraph and paragraph_content:
+                    # 기존 단락 종료
+                    combined_content = ' '.join(paragraph_content)
+                    html_lines.append(f'<p>{combined_content}</p>')
+                    paragraph_content = []
+                    in_paragraph = False
+                if not in_list:
+                    html_lines.append('<ul>')
+                    in_list = True
+                content = line[2:]  # '* ' 제거
+                # 내용에서 **굵은 텍스트** 처리
+                content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content)
+                html_lines.append(f'<li>{content}</li>')
+            else:
+                if in_list:
+                    html_lines.append('</ul>')
+                    in_list = False
+                
+                # 헤더 처리
+                if line.startswith('### '):
+                    if in_paragraph and paragraph_content:
+                        # 기존 단락 종료
+                        combined_content = ' '.join(paragraph_content)
+                        html_lines.append(f'<p>{combined_content}</p>')
+                        paragraph_content = []
+                        in_paragraph = False
+                    content = line[4:]
+                    content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content)
+                    html_lines.append(f'<h3>{content}</h3>')
+                elif line.startswith('## '):
+                    if in_paragraph and paragraph_content:
+                        # 기존 단락 종료
+                        combined_content = ' '.join(paragraph_content)
+                        html_lines.append(f'<p>{combined_content}</p>')
+                        paragraph_content = []
+                        in_paragraph = False
+                    content = line[3:]
+                    content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content)
+                    html_lines.append(f'<h2>{content}</h2>')
+                elif line.startswith('# '):
+                    if in_paragraph and paragraph_content:
+                        # 기존 단락 종료
+                        combined_content = ' '.join(paragraph_content)
+                        html_lines.append(f'<p>{combined_content}</p>')
+                        paragraph_content = []
+                        in_paragraph = False
+                    content = line[2:]
+                    content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content)
+                    html_lines.append(f'<h1>{content}</h1>')
+                else:
+                    # 일반 텍스트 처리 - 단락 내용에 추가
+                    content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', line)
+                    if content.strip():  # 빈 내용이 아닌 경우만
+                        paragraph_content.append(content)
+                        in_paragraph = True
+        
+        # 마지막 단락 처리
+        if in_paragraph and paragraph_content:
+            combined_content = ' '.join(paragraph_content)
+            html_lines.append(f'<p>{combined_content}</p>')
+        if in_list:
+            html_lines.append('</ul>')
+        
+        return '\n'.join(html_lines)
     
     def process_single_notam_complete(self, notam: Dict[str, Any], e_section: str, index: int) -> Dict[str, Any]:
         """단일 NOTAM을 완전히 처리 (notam_translator.py 방식 참조)"""
@@ -211,7 +319,7 @@ class IntegratedNOTAMTranslator:
             # 결과 생성
             enhanced_notam = notam.copy()
             enhanced_notam.update({
-                'korean_translation': self.apply_color_styles(korean_translation) if korean_translation else '번역 실패',
+                'korean_translation': self.convert_markdown_to_html(self.apply_color_styles(korean_translation)) if korean_translation else '번역 실패',
                 'korean_summary': korean_summary or '요약 실패',
                 'english_translation': self.apply_color_styles(english_translation) if english_translation else 'Translation failed',
                 'english_summary': english_summary or 'Summary failed',
@@ -433,7 +541,7 @@ class IntegratedNOTAMTranslator:
             
             enhanced_notam = notam.copy()
             enhanced_notam.update({
-                'korean_translation': self.apply_color_styles(korean_translation) if korean_translation else '번역 실패',
+                'korean_translation': self.convert_markdown_to_html(self.apply_color_styles(korean_translation)) if korean_translation else '번역 실패',
                 'korean_summary': korean_summary or '요약 실패',
                 'english_translation': self.apply_color_styles(english_translation) if english_translation else 'Translation failed',
                 'english_summary': english_summary or 'Summary failed',
@@ -532,6 +640,11 @@ class IntegratedNOTAMTranslator:
             results = self.parse_integrated_response(response.text, 1)
             
             result = results[0] if results else {'translation': notam_text, 'summary': ''}
+            
+            # 한국어 번역인 경우 마크다운을 HTML로 변환
+            if target_language == 'ko' and result.get('translation'):
+                result['translation'] = self.convert_markdown_to_html(self.apply_color_styles(result['translation']))
+            
             self.logger.debug(f"단일 통합 처리 완료 - 번역: {result.get('translation', '')[:50]}..., 요약: {result.get('summary', '')[:30]}...")
             
             # 캐시 저장
@@ -565,80 +678,113 @@ class IntegratedNOTAMTranslator:
         """한국어 통합 프롬프트 생성"""
         notams_text = "\n\n".join([f"NOTAM {i+1}:\n{notam}" for i, notam in enumerate(notams)])
         
-        return f"""다음 NOTAM들을 한국어로 번역하고, 각 번역의 핵심 내용을 요약해주세요.
+        return f"""다음 NOTAM을 명확하고 간결한 한국어로 정리해주세요.
 
 {notams_text}
 
-출력 형식:
-각 NOTAM에 대해 다음 형식으로 출력하세요:
+요청사항:
+이 NOTAM을 사용자가 쉽게 이해할 수 있도록 구조화된 한국어로 정리해주세요.
 
-NOTAM 1:
-번역: [완전한 한국어 번역]
-요약: [핵심 내용만 간단히 요약]
+출력 형식 (정확히 이 형식을 따라주세요):
+**주요 내용:**
+[핵심 내용을 한 줄로 요약]
 
-NOTAM 2:
-번역: [완전한 한국어 번역]
-요약: [핵심 내용만 간단히 요약]
+**상세 내용:**
+
+*   [구체적인 세부사항을 항목별로 정리]
+*   [각 항목은 별도의 불릿 포인트로 구분]
+
+**운영 지침:**
+
+*   [운영상 주의사항이나 지침]
+*   [각 지침은 별도의 불릿 포인트로 구분]
+
+**기타:**
+
+*   [기타 중요한 정보]
+*   [각 정보는 별도의 불릿 포인트로 구분]
 
 번역 규칙:
-1. 다음 용어는 그대로 유지:
-   - NOTAM, AIRAC, AIP, SUP, AMDT, WEF, TIL, UTC
-   - GPS, RAIM, PBN, RNAV, RNP
-   - RWY, TWY, APRON, TAXI, SID, STAR, IAP
-   - SFC, AMSL, AGL, MSL
-   - PSN, RADIUS, HGT, HEIGHT
-   - TEMP, PERM, OBST, FIREWORKS
-   - 모든 좌표, 주파수, 측정값
-   - 모든 날짜와 시간은 원래 형식 유지
+1. 자연스러운 한국어로 번역하되 전문용어는 정확하게
+2. 시간 정보는 KST로 변환하여 표시 (예: 2025년 2월 3일 09:00)
+3. 중요한 정보는 **굵게** 표시
+4. 사용자가 쉽게 이해할 수 있도록 구조화
+5. 불필요한 반복이나 어색한 표현 제거
+6. 각 섹션 사이에는 빈 줄을 넣어 가독성 향상
+7. 불릿 포인트는 "*   " 형식으로 시작
 
-2. 특정 용어 번역:
-   - 'CLOSED'는 '폐쇄'로 번역
-   - 'PAVEMENT CONSTRUCTION'은 '포장 공사'로 번역
-   - 'OUTAGES'는 '기능 상실'로 번역
-   - 'PREDICTED FOR'는 '에 영향을 줄 것으로 예측됨'으로 번역
-   - 'WILL TAKE PLACE'는 '진행될 예정'으로 번역
-   - 'NPA'는 '비정밀접근'으로 번역
-   - 'FLW'는 '다음과 같이'로 번역
-   - 'ACFT'는 '항공기'로 번역
-   - 'NR.'는 '번호'로 번역
-   - 'ESTABLISHMENT OF'는 '신설'로 번역
-   - 'INFORMATION OF'는 '정보'로 번역
-   - 'CIRCLE'은 '원형'으로 번역
-   - 'CENTERED'는 '중심'으로 번역
-   - 'DUE TO'는 '로 인해'로 번역
-   - 'MAINT'는 '정비'로 번역
-   - 'NML OPS'는 '정상 운영'으로 번역
-   - 'U/S'는 '사용 불가'로 번역
-   - 'STANDBY'는 '대기'로 번역
-   - 'AVBL'는 '사용 가능'로 번역
-   - 'UNAVBL'는 '사용 불가'로 번역
+항공 전문용어 번역 (정확한 한국어 용어 사용):
+- VDGS → 차량유도도킹시스템
+- CONCOURSE → 탑승동
+- MAINTENANCE → 정비
+- AIRCRAFT → 항공기
+- MARSHALLER → 유도요원
+- DOCKING → 접현
+- INFORMATION → 정보
+- PROVIDED → 제공
+- GUIDED BY → 지시에 따라
+- TRIAL OPERATION → 시험운영
+- IMPLEMENTED → 실시
+- NOTIFIED → 공지
+- CHANGE → 변경
+- DURING THE PERIOD → 해당기간동안
+- REMAINING DISTANCE → 잔여거리
+- LEFT AND RIGHT DEVIATION → 좌우편차
+- TOBT → 이륙예정시간
+- TSAT → 이륙시정예정시간
+- A-CDM → 공항협력결정관리
+- UTC → 협정세계시
+- FROM ... TO ... → ...부터 ...까지
+- DUE TO → 로 인해
+- SERVICE → 서비스
+- CLOSED → 폐쇄
+- NR. → 번호
+- RWY → 활주로
+- TWY → 택시웨이
+- WIP → 작업 진행
+- CLSD → 폐쇄
+- NML OPS → 정상 운영
+- SIMULTANEOUS PARALLEL APPROACHES → 동시 평행 접근
+- SUSPENDED → 중단
+- REF → 참조
 
-요약 규칙:
-1. 절대로 다음 정보를 포함하지 마세요:
-   - 시간 정보 (날짜, 시간, 기간, UTC)
-   - 문서 참조 (AIRAC, AIP, AMDT, SUP)
-   - "새로운 정보", "정보 포함", "정보 변경" 등의 표현
-   - 공항명
-   - 좌표
-   - 불필요한 괄호나 특수문자
-   - 중복되는 단어나 구문
+예시:
+원문: "VDGS CLOSED DUE TO MAINTENANCE OF SERVICE FOR CONCOURSE"
+정리: 
+**주요 내용:**
+탑승동(Concourse)의 **차량유도도킹시스템(VDGS)**가 서비스 정비로 인해 폐쇄됩니다.
 
-2. 포함할 내용:
-   - 주요 변경사항 또는 영향
-   - 변경사항의 구체적 세부사항
-   - 변경 사유
+**상세 내용:**
 
-3. 간단명료하게 작성:
-   - 가능한 짧게 표현
-   - 직접적이고 능동적인 표현 사용
-   - 핵심 정보만 포함
+*   **차량유도도킹시스템(VDGS)**가 **서비스 정비**로 인해 **폐쇄**됩니다.
+*   **탑승동(Concourse)**에서의 VDGS 서비스가 중단됩니다.
 
-4. 활주로 방향 표시:
-   - 항상 "L/R" 형식을 사용하세요 (예: "활주로 15 L/R")
-   - "L/R"을 "좌/우"로 번역하지 마세요
-   - 활주로 번호와 L/R 사이에 공백을 유지하세요
+**운영 지침:**
 
-각 NOTAM을 위 형식에 맞춰 번역과 요약을 제공해주세요."""
+*   항공기 도킹 시 **유도요원**의 지시를 따라야 합니다.
+
+**기타:**
+
+*   정비 완료 후 별도 공지될 예정입니다.
+
+원문: "THE AIRCRAFT SHALL BE GUIDED BY MARSHALLER"
+정리:
+**주요 내용:**
+항공기는 **유도요원**의 지시에 따라야 합니다.
+
+**상세 내용:**
+
+*   항공기 유도 시 **유도요원(Marshaller)**의 지시를 따라야 합니다.
+
+**운영 지침:**
+
+*   자동 유도 시스템 사용 불가 시 **유도요원** 지시 준수
+
+**기타:**
+
+*   안전한 항공기 유도를 위한 필수 절차입니다.
+
+각 NOTAM을 위 형식과 용어를 사용하여 정리해주세요."""
     
     def create_english_integrated_prompt(self, notams: List[str]) -> str:
         """영어 통합 프롬프트 생성"""
@@ -648,21 +794,41 @@ NOTAM 2:
 
 {notams_text}
 
+⚠️ CRITICAL TRANSLATION RULES ⚠️
+1. ALWAYS translate ALL numbered lists completely:
+   - "1. RTE : A593 VIA SADLI" → "1. ROUTE: A593 VIA SADLI"
+   - "2. ACFT : LANDING RKRR" → "2. AIRCRAFT: LANDING RKRR"
+   - "3. PROC : FL330 AT OR BELOW AVBL" → "3. PROCEDURE: FL330 AT OR BELOW AVAILABLE"
+
+2. Handle "FLOW CTL AS FLW" pattern:
+   - "FLOW CTL AS FLW" → "FLOW CONTROL AS FOLLOWING"
+   - Translate ALL subsequent numbered items (1. 2. 3. ...)
+   - DO NOT stop translation at numbered lists
+
+3. NEVER stop translation:
+   - Translate the entire text even if it's long
+   - Translate all numbered lists completely
+   - Handle complex structures fully
+
 Output Format:
 For each NOTAM, output in the following format:
 
 NOTAM 1:
-Translation: [Complete English translation]
+Translation: [Complete English translation - including ALL numbered lists]
 Summary: [Brief summary of key points]
 
 NOTAM 2:
-Translation: [Complete English translation]
+Translation: [Complete English translation - including ALL numbered lists]
 Summary: [Brief summary of key points]
 
 Translation Rules:
 1. Expand abbreviations and acronyms to full English words:
    - 'FLW' → 'FOLLOWING'
+   - 'AS FLW' → 'AS FOLLOWING'
+   - 'FLOW CTL AS FLW' → 'FLOW CONTROL AS FOLLOWING'
    - 'ACFT' → 'AIRCRAFT'
+   - 'RTE' → 'ROUTE'
+   - 'PROC' → 'PROCEDURE'
    - 'AWY' → 'AIRWAY'
    - 'ALTN' → 'ALTERNATE'
    - 'REQ' → 'REQUEST'
@@ -675,7 +841,16 @@ Translation Rules:
    - 'STANDBY' → 'STANDBY'
    - 'AVBL' → 'AVAILABLE'
    - 'UNAVBL' → 'UNAVAILABLE'
+   - 'NOT AVBL' → 'NOT AVAILABLE'
+   - 'SEPARATION' → 'SEPARATION'
+   - 'SAME ALTITUDE' → 'SAME ALTITUDE'
+   - 'AT OR BELOW' → 'AT OR BELOW'
+   - 'LANDING' → 'LANDING'
+   - 'ENTERING' → 'ENTERING'
    - 'RMK' → 'REMARK'
+   - 'WIP' → 'WORK IN PROGRESS'
+   - 'CLSD' → 'CLOSED'
+   - 'NML OPS' → 'NORMAL OPERATIONS'
    - 'TEL' → 'TELEPHONE'
    - 'PSN' → 'POSITION'
    - 'HGT' → 'HEIGHT'
@@ -687,7 +862,16 @@ Translation Rules:
    - 'RNAV' → 'AREA NAVIGATION'
    - 'RNP' → 'REQUIRED NAVIGATION PERFORMANCE'
 
-2. Keep the following terms as is (aviation standards):
+2. Translation Examples:
+   Example 1:
+   Original: "FLOW CTL AS FLW 1. RTE : A593 VIA SADLI 2. ACFT : LANDING RKRR 3. PROC : FL330 AT OR BELOW AVBL"
+   Translation: "FLOW CONTROL AS FOLLOWING 1. ROUTE: A593 VIA SADLI 2. AIRCRAFT: LANDING RKRR 3. PROCEDURE: FL330 AT OR BELOW AVAILABLE"
+   
+   Example 2:
+   Original: "RWY 15L/33R CLSD DUE TO WIP RMK: TWY L, TWY K, TWY E, TWY J, TWY G NML OPS"
+   Translation: "RWY 15L/33R CLOSED DUE TO WORK IN PROGRESS REMARK: TWY L, TWY K, TWY E, TWY J, TWY G NORMAL OPERATIONS"
+
+3. Keep the following terms as is (aviation standards):
    - NOTAM, AIRAC, AIP, SUP, AMDT, WEF, TIL, UTC
    - GPS, RAIM, PBN, RNAV, RNP
    - RWY, TWY, APRON, TAXI, SID, STAR, IAP
@@ -753,6 +937,33 @@ Please provide translation and summary for each NOTAM in the specified format.""
             파싱된 결과 리스트
         """
         results = []
+        
+        # 한국어 응답인 경우 전체를 번역으로 처리
+        if '**주요 내용:**' in response or '**상세 내용:**' in response:
+            # 한국어 구조화된 응답 파싱
+            translation = response.strip()
+            summary = ""
+            
+            # 주요 내용에서 요약 추출
+            if '**주요 내용:**' in response:
+                lines = response.split('\n')
+                for i, line in enumerate(lines):
+                    if '**주요 내용:**' in line:
+                        # 다음 비어있지 않은 줄이 요약
+                        for j in range(i + 1, len(lines)):
+                            next_line = lines[j].strip()
+                            if next_line and not next_line.startswith('**'):
+                                summary = next_line.replace('*', '').strip()
+                                break
+                        break
+            
+            results.append({
+                'translation': translation,
+                'summary': summary
+            })
+            return results
+        
+        # 기존 영어 응답 파싱 로직
         lines = response.strip().split('\n')
         
         current_notam = None
@@ -822,7 +1033,8 @@ Please provide translation and summary for each NOTAM in the specified format.""
     
     def extract_e_section(self, notam_text: str) -> str:
         """
-        NOTAM에서 E 섹션 추출
+        NOTAM에서 E 섹션 추출 (사용하지 않음 - 이미 추출된 original_text 사용)
+        이 함수는 하위 호환성을 위해 유지되지만 실제로는 사용되지 않습니다.
         
         Args:
             notam_text: NOTAM 텍스트
@@ -844,18 +1056,14 @@ Please provide translation and summary for each NOTAM in the specified format.""
             match = re.search(pattern, notam_text, re.DOTALL | re.IGNORECASE)
             if match:
                 e_section = match.group(1).strip()
-                # 메타데이터 제거
+                # 메타데이터 제거 (RMK는 중요한 정보이므로 제거하지 않음)
                 e_section = re.sub(r'CREATED:.*$', '', e_section, flags=re.DOTALL).strip()
                 e_section = re.sub(r'SOURCE:.*$', '', e_section, flags=re.DOTALL).strip()
-                e_section = re.sub(r'RMK:.*$', '', e_section, flags=re.DOTALL).strip()
                 e_section = re.sub(r'COMMENT\).*$', '', e_section, flags=re.DOTALL).strip()
                 
-                # E 섹션이 충분히 긴지 확인 (최소 100자)
-                if len(e_section) >= 100:
+                # E 섹션이 있으면 반환
+                if e_section:
                     return e_section
-                else:
-                    # 너무 짧으면 다음 패턴 시도
-                    continue
         
         # E 섹션을 찾지 못한 경우 전체 텍스트에서 핵심 내용만 추출
         cleaned_text = notam_text.strip()
@@ -866,10 +1074,9 @@ Please provide translation and summary for each NOTAM in the specified format.""
         # 공항 코드와 NOTAM 번호 제거 (예: RKSI COAD01/25)
         cleaned_text = re.sub(r'[A-Z]{4}\s+[A-Z0-9]+/\d{2}', '', cleaned_text)
         
-        # 메타데이터 제거
+        # 메타데이터 제거 (RMK는 중요한 정보이므로 제거하지 않음)
         cleaned_text = re.sub(r'CREATED:.*$', '', cleaned_text, flags=re.DOTALL).strip()
         cleaned_text = re.sub(r'SOURCE:.*$', '', cleaned_text, flags=re.DOTALL).strip()
-        cleaned_text = re.sub(r'RMK:.*$', '', cleaned_text, flags=re.DOTALL).strip()
         cleaned_text = re.sub(r'COMMENT\).*$', '', cleaned_text, flags=re.DOTALL).strip()
         
         # 연속된 공백 정리
@@ -932,13 +1139,28 @@ Please provide translation and summary for each NOTAM in the specified format.""
             self.logger.info(f"NOTAM {i+1}: {notam.get('notam_number', 'N/A')} ({notam.get('airport_code', 'N/A')}) [ID: {notam['_internal_id']}]")
             self.logger.info(f"  원문: {notam.get('description', '')[:100]}...")
         
-        # E 섹션 추출
-        e_sections = []
+        # 이미 추출된 원문(original_text) 사용 - E 섹션 재추출하지 않음
+        original_texts = []
         for i, notam in enumerate(notams_data):
-            description = notam.get('description', '')
-            e_section = self.extract_e_section(description)
-            e_sections.append(e_section)
-            self.logger.debug(f"NOTAM {i+1} E 섹션 추출: {e_section[:100]}...")
+            # original_text가 있으면 그것을 사용, 없으면 description 사용
+            original_text = notam.get('original_text', notam.get('description', ''))
+            
+            # HTML 태그 제거 (색상 스타일 제거)
+            if original_text:
+                # <span> 태그와 style 속성 제거
+                import re
+                clean_text = re.sub(r'<span[^>]*>', '', original_text)
+                clean_text = re.sub(r'</span>', '', clean_text)
+                clean_text = re.sub(r'<[^>]+>', '', clean_text)  # 기타 HTML 태그 제거
+                clean_text = clean_text.strip()
+            else:
+                clean_text = ''
+            
+            original_texts.append(clean_text)
+            self.logger.debug(f"NOTAM {i+1} 원문 사용: {clean_text[:100]}...")
+        
+        # e_sections를 original_texts로 변경
+        e_sections = original_texts
         
         # 개별 처리로 전환 (배치 처리 문제 해결)
         self.logger.info(f"개별 처리 모드로 전환: {len(notams_data)}개 NOTAM")

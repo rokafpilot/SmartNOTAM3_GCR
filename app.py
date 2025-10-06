@@ -281,6 +281,94 @@ def upload_file():
 def health_check():
     return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
 
+@app.route('/api/analyze_route', methods=['POST'])
+def analyze_route():
+    """GEMINI를 사용한 AI 기반 루트 분석 API"""
+    logger.info("analyze_route API 호출됨")
+    try:
+        data = request.get_json()
+        route = data.get('route', '').strip()
+        
+        if not route:
+            return jsonify({'error': '항로를 입력해주세요.'}), 400
+        
+        logger.info(f"분석할 항로: {route}")
+        
+        # GEMINI를 사용한 루트 분석
+        analysis_result = analyze_route_with_gemini(route)
+        
+        return jsonify({
+            'route': route,
+            'analysis': analysis_result,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"루트 분석 중 오류: {str(e)}")
+        return jsonify({'error': f'루트 분석 중 오류가 발생했습니다: {str(e)}'}), 500
+
+def analyze_route_with_gemini(route):
+    """GEMINI를 사용한 루트 분석"""
+    try:
+        import google.generativeai as genai
+        
+        # GEMINI API 키 확인
+        api_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY')
+        if not api_key:
+            return "GEMINI API 키가 설정되지 않았습니다."
+        
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        prompt = f"""다음 항공 항로를 분석하여 상세한 비행 브리핑을 작성해주세요.
+
+항로: {route}
+
+분석 요구사항:
+1. 항로의 주요 지점들을 식별하고 설명
+2. 각 구간별 비행 특성 분석 (거리, 예상 비행시간, 고도 등)
+3. 항로상의 잠재적 위험 요소 식별
+4. 기상, 관제, 항로 변경 등의 고려사항
+5. 비행 계획 수립 시 주의사항
+6. 대체 항로 제안 (필요시)
+
+분석 결과를 다음 형식으로 제공해주세요:
+
+## 항로 개요
+- 출발지: [공항코드]
+- 목적지: [공항코드]
+- 총 거리: [예상거리]
+- 예상 비행시간: [시간]
+
+## 주요 지점 분석
+1. [지점명]: [설명]
+2. [지점명]: [설명]
+...
+
+## 비행 특성
+- 권장 고도: [고도]
+- 항로 유형: [SID/STAR/ENROUTE]
+- 관제 구역: [FIR 정보]
+
+## 주의사항
+- [주의사항 1]
+- [주의사항 2]
+...
+
+## 권장사항
+- [권장사항 1]
+- [권장사항 2]
+...
+
+한국어로 상세하고 전문적으로 작성해주세요."""
+
+        response = model.generate_content(prompt)
+        return response.text.strip()
+        
+    except Exception as e:
+        logger.error(f"GEMINI 루트 분석 중 오류: {str(e)}")
+        return f"AI 분석 중 오류가 발생했습니다: {str(e)}"
+
 @app.route('/api/extract_airports', methods=['POST'])
 def extract_airports():
     """PDF에서 공항 코드를 추출하는 API"""

@@ -59,6 +59,33 @@
             border-radius: 0.375rem;
             margin-bottom: 1rem;
         }
+        .ai-analysis-content {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 15px;
+            border-left: 4px solid #28a745;
+        }
+        .ai-analysis-content h4 {
+            color: #28a745;
+            border-bottom: 2px solid #28a745;
+            padding-bottom: 8px;
+        }
+        .ai-analysis-content h5 {
+            color: #495057;
+            margin-top: 20px;
+        }
+        .ai-analysis-content ul {
+            padding-left: 20px;
+        }
+        .ai-analysis-content li {
+            margin-bottom: 8px;
+            line-height: 1.6;
+        }
+        .ai-analysis-content p {
+            margin-bottom: 12px;
+            line-height: 1.7;
+        }
     </style>
 </head>
 <body>
@@ -224,7 +251,7 @@
                     <div class="col-md-4">
                         <div class="d-flex flex-column justify-content-end h-100">
                             <button type="button" class="btn btn-primary mb-2" id="analyzeRouteBtn">
-                                <i class="fas fa-search me-2"></i>ROUTE NOTAM 요약
+                                <i class="fas fa-robot me-2"></i>AI 항로 분석
                             </button>
                             <button type="button" class="btn btn-outline-secondary btn-sm" id="clearRouteBtn">
                                 <i class="fas fa-eraser me-1"></i>초기화
@@ -878,18 +905,84 @@
             // 로딩 상태 표시
             const analyzeBtn = document.getElementById('analyzeRouteBtn');
             const originalText = analyzeBtn.innerHTML;
-            analyzeBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>분석 중...';
+            analyzeBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>AI 분석 중...';
             analyzeBtn.disabled = true;
 
-            // 루트 분석 로직
-            const analysisResult = performRouteAnalysis(routeInput);
-            
-            // 결과 표시
-            displayRouteAnalysis(analysisResult);
+            // AI 기반 루트 분석
+            performAIRouteAnalysis(routeInput)
+                .then(result => {
+                    displayAIRouteAnalysis(result);
+                })
+                .catch(error => {
+                    console.error('AI 분석 오류:', error);
+                    // 폴백: 기존 분석 방식 사용
+                    const analysisResult = performRouteAnalysis(routeInput);
+                    displayRouteAnalysis(analysisResult);
+                })
+                .finally(() => {
+                    // 버튼 상태 복원
+                    analyzeBtn.innerHTML = originalText;
+                    analyzeBtn.disabled = false;
+                });
+        }
 
-            // 버튼 상태 복원
-            analyzeBtn.innerHTML = originalText;
-            analyzeBtn.disabled = false;
+        async function performAIRouteAnalysis(route) {
+            try {
+                const response = await fetch('/api/analyze_route', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ route: route })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                console.error('AI 분석 API 호출 실패:', error);
+                throw error;
+            }
+        }
+
+        function displayAIRouteAnalysis(result) {
+            const resultDiv = document.getElementById('routeAnalysisResult');
+            const contentDiv = document.getElementById('routeAnalysisContent');
+            
+            // AI 분석 결과를 마크다운 형식으로 표시
+            const formattedAnalysis = formatMarkdownToHTML(result.analysis);
+            
+            contentDiv.innerHTML = `
+                <div class="alert alert-success mb-3">
+                    <h5 class="alert-heading">🤖 AI 기반 항로 분석 결과</h5>
+                    <p class="mb-0"><strong>분석 항로:</strong> ${result.route}</p>
+                    <small class="text-muted">분석 시간: ${new Date(result.timestamp).toLocaleString()}</small>
+                </div>
+                <div class="ai-analysis-content">
+                    ${formattedAnalysis}
+                </div>
+            `;
+            
+            resultDiv.style.display = 'block';
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function formatMarkdownToHTML(markdown) {
+            // 간단한 마크다운을 HTML로 변환
+            return markdown
+                .replace(/^## (.*$)/gim, '<h4 class="mt-4 mb-3">$1</h4>')
+                .replace(/^### (.*$)/gim, '<h5 class="mt-3 mb-2">$1</h5>')
+                .replace(/^\- (.*$)/gim, '<li>$1</li>')
+                .replace(/^\d+\. (.*$)/gim, '<li>$1</li>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/^(?!<[h|l])/gm, '<p>')
+                .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+                .replace(/<\/ul>\s*<ul>/g, '');
         }
 
         function performRouteAnalysis(route) {

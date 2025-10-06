@@ -288,14 +288,16 @@ def analyze_route():
     try:
         data = request.get_json()
         route = data.get('route', '').strip()
+        notam_data = data.get('notam_data', [])
         
         if not route:
             return jsonify({'error': '항로를 입력해주세요.'}), 400
         
         logger.info(f"분석할 항로: {route}")
+        logger.info(f"NOTAM 데이터 개수: {len(notam_data)}")
         
         # GEMINI를 사용한 루트 분석
-        analysis_result = analyze_route_with_gemini(route)
+        analysis_result = analyze_route_with_gemini(route, notam_data)
         
         return jsonify({
             'route': route,
@@ -307,8 +309,8 @@ def analyze_route():
         logger.error(f"루트 분석 중 오류: {str(e)}")
         return jsonify({'error': f'루트 분석 중 오류가 발생했습니다: {str(e)}'}), 500
 
-def analyze_route_with_gemini(route):
-    """GEMINI를 사용한 루트 분석"""
+def analyze_route_with_gemini(route, notam_data):
+    """GEMINI를 사용한 루트 분석 - NOTAM과 항로 연관성 중심"""
     try:
         import google.generativeai as genai
         
@@ -320,47 +322,60 @@ def analyze_route_with_gemini(route):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-2.0-flash-exp')
         
-        prompt = f"""다음 항공 항로를 분석하여 상세한 비행 브리핑을 작성해주세요.
+        # NOTAM 데이터를 문자열로 변환
+        notam_text = format_notam_data_for_analysis(notam_data)
+        
+        prompt = f"""다음 항공 항로와 관련된 NOTAM을 분석하여 항로에 미치는 영향을 평가해주세요.
 
-항로: {route}
+분석할 항로: {route}
+
+현재 NOTAM 데이터:
+{notam_text}
 
 분석 요구사항:
-1. 항로의 주요 지점들을 식별하고 설명
-2. 각 구간별 비행 특성 분석 (거리, 예상 비행시간, 고도 등)
-3. 항로상의 잠재적 위험 요소 식별
-4. 기상, 관제, 항로 변경 등의 고려사항
-5. 비행 계획 수립 시 주의사항
-6. 대체 항로 제안 (필요시)
+1. 항로상의 각 공항(VVDN, RKSI)과 waypoint가 NOTAM에 언급되어 있는지 확인
+2. NOTAM이 항로의 특정 구간에 영향을 미치는지 분석
+3. 항로 변경, 고도 제한, 속도 제한 등이 필요한지 판단
+4. 비행 안전에 직접적인 영향을 미치는 NOTAM 식별
+5. 각 NOTAM의 중요도와 우선순위 평가
 
 분석 결과를 다음 형식으로 제공해주세요:
 
-## 항로 개요
-- 출발지: [공항코드]
-- 목적지: [공항코드]
-- 총 거리: [예상거리]
-- 예상 비행시간: [시간]
+## 항로-NOTAM 연관성 분석
 
-## 주요 지점 분석
-1. [지점명]: [설명]
-2. [지점명]: [설명]
-...
+### 직접 영향 NOTAM
+- [NOTAM 번호]: [항로 구간] - [영향 내용] - [조치사항]
 
-## 비행 특성
-- 권장 고도: [고도]
-- 항로 유형: [SID/STAR/ENROUTE]
-- 관제 구역: [FIR 정보]
+### 간접 영향 NOTAM  
+- [NOTAM 번호]: [관련 공항/지점] - [영향 내용] - [주의사항]
 
-## 주의사항
-- [주의사항 1]
-- [주의사항 2]
-...
+### 항로별 영향 분석
+**VVDN 구간:**
+- [NOTAM 영향 분석]
 
-## 권장사항
-- [권장사항 1]
-- [권장사항 2]
-...
+**중간 구간 (BUNT2G ~ OLMEN):**
+- [NOTAM 영향 분석]
 
-한국어로 상세하고 전문적으로 작성해주세요."""
+**RKSI 구간:**
+- [NOTAM 영향 분석]
+
+## 비행 계획 권장사항
+- [NOTAM 기반 비행 계획 수정사항]
+- [대체 절차 또는 항로]
+- [특별 주의사항]
+
+## 우선순위별 조치사항
+**긴급 (즉시 조치 필요):**
+- [항목들]
+
+**중요 (비행 전 확인 필요):**
+- [항목들]
+
+**참고 (인지 필요):**
+- [항목들]
+
+NOTAM 데이터가 없거나 항로와 관련이 없는 경우, 해당 사실을 명확히 명시해주세요.
+한국어로 간결하고 실용적으로 작성해주세요."""
 
         response = model.generate_content(prompt)
         return response.text.strip()
@@ -368,6 +383,21 @@ def analyze_route_with_gemini(route):
     except Exception as e:
         logger.error(f"GEMINI 루트 분석 중 오류: {str(e)}")
         return f"AI 분석 중 오류가 발생했습니다: {str(e)}"
+
+def format_notam_data_for_analysis(notam_data):
+    """NOTAM 데이터를 분석용 문자열로 변환"""
+    if not notam_data:
+        return "현재 NOTAM 데이터가 없습니다."
+    
+    formatted_text = "NOTAM 목록:\n\n"
+    for notam in notam_data:
+        formatted_text += f"NOTAM #{notam['index']}: {notam['notam_number']}\n"
+        formatted_text += f"공항: {', '.join(notam['airports'])}\n"
+        formatted_text += f"유효시간: {notam['effective_time']} - {notam['expiry_time']}\n"
+        formatted_text += f"내용: {notam['text']}\n"
+        formatted_text += "---\n"
+    
+    return formatted_text
 
 @app.route('/api/extract_airports', methods=['POST'])
 def extract_airports():

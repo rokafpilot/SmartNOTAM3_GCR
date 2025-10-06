@@ -928,12 +928,18 @@
 
         async function performAIRouteAnalysis(route) {
             try {
+                // 현재 페이지의 NOTAM 데이터 수집
+                const notamData = collectCurrentNotamData();
+                
                 const response = await fetch('/api/analyze_route', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ route: route })
+                    body: JSON.stringify({ 
+                        route: route,
+                        notam_data: notamData
+                    })
                 });
 
                 if (!response.ok) {
@@ -946,6 +952,31 @@
                 console.error('AI 분석 API 호출 실패:', error);
                 throw error;
             }
+        }
+
+        function collectCurrentNotamData() {
+            const notamItems = document.querySelectorAll('.notam-item');
+            const notamData = [];
+            
+            notamItems.forEach((item, index) => {
+                const notamNumber = item.querySelector('td')?.textContent?.trim() || '';
+                const airportBadges = item.querySelectorAll('.badge.bg-info');
+                const airports = Array.from(airportBadges).map(badge => badge.textContent.trim());
+                const notamText = item.querySelector('.notam-text')?.textContent?.trim() || '';
+                const effectiveTime = item.querySelector('[data-effective-time]')?.dataset.effectiveTime || '';
+                const expiryTime = item.querySelector('[data-expiry-time]')?.dataset.expiryTime || '';
+                
+                notamData.push({
+                    index: index + 1,
+                    notam_number: notamNumber,
+                    airports: airports,
+                    text: notamText,
+                    effective_time: effectiveTime,
+                    expiry_time: expiryTime
+                });
+            });
+            
+            return notamData;
         }
 
         function displayAIRouteAnalysis(result) {

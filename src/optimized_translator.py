@@ -153,6 +153,7 @@ class OptimizedNOTAMTranslator:
                 "   - 'MAINT'는 '정비'로 번역",
                 "   - 'AVBL'는 '사용 가능'로 번역",
                 "   - 'UNAVBL'는 '사용 불가'로 번역",
+                "   - 'CEILING'은 '운고'로 번역",
                 "   - 괄호 안의 내용은 가능한 한 번역",
                 "   - 열린 괄호는 반드시 닫기",
                 "",

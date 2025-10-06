@@ -232,6 +232,12 @@ class HybridNOTAMTranslator:
             else:  # Korean
                 prompt = f"""다음 NOTAM 텍스트를 한국어로 번역하세요. 설명, 주석, 추가 정보를 포함하지 마세요. 직접 번역만 반환하세요:
 
+중요한 번역 규칙:
+- "CEILING"은 반드시 "운고"로 번역하세요
+- "CLOSED"는 "폐쇄"로 번역하세요
+- "REF"는 "참조"로 번역하세요
+- 전문용어는 정확한 한국어 용어로 번역하세요
+
 {e_section}"""
             
             # Gemini API 호출

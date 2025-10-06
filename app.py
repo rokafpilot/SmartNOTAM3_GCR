@@ -9,6 +9,7 @@ import subprocess
 import logging
 from datetime import datetime
 import json
+import glob
 
 # 로컬 모듈
 import sys
@@ -49,9 +50,49 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['TEMP_FOLDER'] = TEMP_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
 
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def cleanup_files(directory, max_files=5):
+    """
+    지정된 디렉토리에서 최대 파일 개수만 유지하고 나머지는 삭제
+    파일은 생성 시간 기준으로 오래된 것부터 삭제
+    """
+    try:
+        if not os.path.exists(directory):
+            return
+            
+        # 디렉토리 내 모든 파일 목록 가져오기
+        files = glob.glob(os.path.join(directory, '*'))
+        
+        # 파일과 디렉토리만 필터링 (숨김 파일 제외)
+        files = [f for f in files if os.path.isfile(f) and not os.path.basename(f).startswith('.')]
+        
+        if len(files) <= max_files:
+            return
+
+        # 파일 생성 시간 기준으로 정렬 (오래된 것부터)
+        files.sort(key=lambda x: os.path.getctime(x))
+        
+        # 초과 파일들 삭제
+        files_to_delete = files[:-max_files]
+        for file_path in files_to_delete:
+            try:
+                os.remove(file_path)
+                logger.info(f"오래된 파일 삭제: {file_path}")
+            except Exception as e:
+                logger.error(f"파일 삭제 실패 {file_path}: {str(e)}")
+                
+    except Exception as e:
+        logger.error(f"파일 정리 중 오류 ({directory}): {str(e)}")
+
 # 폴더 생성
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(TEMP_FOLDER, exist_ok=True)
+
+# 애플리케이션 시작 시 기존 파일 정리
+cleanup_files(UPLOAD_FOLDER, max_files=5)
+cleanup_files(TEMP_FOLDER, max_files=5)
 
 # 모듈 초기화
 pdf_converter = PDFConverter()
@@ -60,9 +101,6 @@ notam_translator = NOTAMTranslator()
 hybrid_translator = HybridNOTAMTranslator()
 parallel_translator = ParallelHybridNOTAMTranslator()
 integrated_translator = IntegratedNOTAMTranslator()
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @app.route('/')
 def index():
@@ -92,6 +130,10 @@ def upload_file():
             filename = f"{timestamp}_{filename}"
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
+            
+            # 업로드 파일 정리 (최대 5개만 유지)
+            cleanup_files(app.config['UPLOAD_FOLDER'], max_files=5)
+            
             processing_times['file_save'] = (datetime.now() - file_save_start).total_seconds()
             
             # PDF 텍스트 변환 시간 측정
@@ -108,19 +150,24 @@ def upload_file():
                 flash('PDF에서 텍스트를 추출할 수 없습니다.')
                 return redirect(url_for('index'))
             
-            # NOTAM 필터링 시간 측정
-            filtering_start = datetime.now()
-            logger.info("NOTAM 필터링 시작")
-            notams = notam_filter.filter_korean_air_notams(text)
-            processing_times['notam_filtering'] = (datetime.now() - filtering_start).total_seconds()
-            logger.info(f"NOTAM 필터링 완료: {len(notams)}개 ({processing_times['notam_filtering']:.2f}초)")
-            
-            # 공항 코드 추출 (필터링 전)
+            # 먼저 Package 정보를 추출하여 동적 순서 설정
+            logger.info("Package 정보 추출 시작")
+            temp_notams = notam_filter.filter_korean_air_notams(text)
             all_airports = set()
-            for notam in notams:
+            for notam in temp_notams:
                 airport_code = notam.get('airport_code', '')
                 if airport_code:
                     all_airports.add(airport_code)
+            
+            # Package 정보 추출하여 동적 순서로 업데이트
+            filtered_package_airports = notam_filter.extract_package_airports(text, all_airports)
+            
+            # 동적 순서가 적용된 상태에서 NOTAM 필터링 재실행
+            filtering_start = datetime.now()
+            logger.info("NOTAM 필터링 시작 (동적 순서 적용)")
+            notams = notam_filter.filter_korean_air_notams(text)
+            processing_times['notam_filtering'] = (datetime.now() - filtering_start).total_seconds()
+            logger.info(f"NOTAM 필터링 완료: {len(notams)}개 ({processing_times['notam_filtering']:.2f}초)")
             
             # 공항 필터링 처리 시간 측정 (선택사항)
             airport_filter_start = datetime.now()
@@ -214,20 +261,6 @@ def upload_file():
             logger.info(f"전체 처리 시간: {processing_times['total']:.2f}초")
             logger.info("==================")
             
-            # 패키지별 공항 정보 생성
-            package_airports = {
-                'package1': ['RKSI', 'VVDN', 'VVTS', 'VVCR', 'SECY'],
-                'package2': ['RKSI', 'RKPC', 'ROAH', 'RJFF', 'RORS', 'RCTP', 'VHHH', 'ZJSY', 'VVNB', 'VVDN', 'VVTS'],
-                'package3': ['RKRR', 'RJJJ', 'RCAA', 'VHHK', 'ZJSA', 'VVHN', 'VVHM']
-            }
-            
-            # 실제 존재하는 공항만 필터링 (빈 리스트가 아닌 경우만 포함)
-            filtered_package_airports = {}
-            for package, airports in package_airports.items():
-                existing_airports = [airport for airport in airports if airport in all_airports]
-                if existing_airports:  # 공항이 하나라도 있으면 포함
-                    filtered_package_airports[package] = existing_airports
-            
             # 템플릿에 공항 정보 전달
             return render_template('results.html', 
                                  notams=notams, 
@@ -272,6 +305,9 @@ def extract_airports():
         temp_filename = f"temp_{timestamp}_{filename}"
         temp_filepath = os.path.join(app.config['TEMP_FOLDER'], temp_filename)
         file.save(temp_filepath)
+        
+        # 임시 파일 정리 (최대 5개만 유지)
+        cleanup_files(app.config['TEMP_FOLDER'], max_files=5)
         
         try:
             logger.info("PDF 텍스트 변환 시작")

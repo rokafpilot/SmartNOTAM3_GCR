@@ -18,7 +18,26 @@ class PDFConverter:
                 page_text = page.extract_text()
                 if page_text:
                     all_text += page_text + "\n"
+        
+        # 인코딩 문제 패턴 제거
+        all_text = self._clean_encoding_issues(all_text)
         return all_text
+    
+    def _clean_encoding_issues(self, text: str) -> str:
+        """인코딩 문제 패턴들을 제거"""
+        # 인코딩 문제 패턴들
+        encoding_patterns = [
+            r'â—A¼IR WAY',
+            r'â—A¼IR SPACE', 
+            r'â—C¼O MPANY',
+            r'â—C¼O MMUNICATION',
+            r'â—[A-Z]¼[A-Z] [A-Z]+',  # 일반적인 패턴
+        ]
+        
+        for pattern in encoding_patterns:
+            text = re.sub(pattern, '', text)
+        
+        return text
     
     def _detect_notam_type(self, text: str) -> str:
         """NOTAM 유형 감지 (pdf_to_txt_auto.py 기반)"""

@@ -298,20 +298,23 @@ class IntegratedNOTAMTranslator:
                 self.logger.debug(f"NOTAM {index+1} 캐시에서 결과 반환")
                 return cached_result
             
+            # 공항 코드 추출
+            airport_code = notam.get('airport_code', 'UNKNOWN')
+            
             # 1단계: 영어 번역 (원문에서 직접)
-            english_result = self.process_single_integrated(e_section, 'en')
+            english_result = self.process_single_integrated(e_section, 'en', airport_code)
             english_translation = english_result.get('translation', '')
             english_summary = english_result.get('summary', '')
             
             # 2단계: 한국어 번역 (영어 번역 결과 사용)
             if english_translation and len(english_translation.strip()) > 10:
-                korean_result = self.process_single_integrated(english_translation, 'ko')
+                korean_result = self.process_single_integrated(english_translation, 'ko', airport_code)
                 korean_translation = korean_result.get('translation', '')
                 korean_summary = korean_result.get('summary', '')
                 self.logger.debug(f"NOTAM {index+1} 영어→한국어 2단계 번역 완료")
             else:
                 # 영어 번역 실패 시 원문으로 직접 한국어 번역
-                korean_result = self.process_single_integrated(e_section, 'ko')
+                korean_result = self.process_single_integrated(e_section, 'ko', airport_code)
                 korean_translation = korean_result.get('translation', '')
                 korean_summary = korean_result.get('summary', '')
                 self.logger.warning(f"NOTAM {index+1} 영어 번역 실패, 원문으로 한국어 번역 시도")
@@ -614,13 +617,14 @@ class IntegratedNOTAMTranslator:
             self.logger.error(f"상세 오류: {traceback.format_exc()}")
             return [{'translation': f'처리 오류: {str(e)}', 'summary': '오류'} for _ in notams]
     
-    def process_single_integrated(self, notam_text: str, target_language: str) -> Dict[str, str]:
+    def process_single_integrated(self, notam_text: str, target_language: str, airport_code: str = None) -> Dict[str, str]:
         """
         단일 NOTAM 통합 처리 (번역 + 요약)
         
         Args:
             notam_text: NOTAM 텍스트
             target_language: 대상 언어 ('ko' 또는 'en')
+            airport_code: 공항 코드 (선택사항)
             
         Returns:
             번역과 요약이 포함된 결과
@@ -634,9 +638,11 @@ class IntegratedNOTAMTranslator:
             return self.cache[cache_key]
         
         try:
-            self.logger.debug(f"단일 통합 처리 시작 - 언어: {target_language}, 텍스트: {notam_text[:100]}...")
-            prompt = self.create_integrated_prompt([notam_text], target_language)
+            self.logger.debug(f"단일 통합 처리 시작 - 언어: {target_language}, 공항: {airport_code}, 텍스트: {notam_text[:100]}...")
+            prompt = self.create_integrated_prompt([notam_text], target_language, airport_code)
             response = self.model.generate_content(prompt)
+            
+            self.logger.debug(f"Gemini 응답 원본: {response.text[:200]}...")
             results = self.parse_integrated_response(response.text, 1)
             
             result = results[0] if results else {'translation': notam_text, 'summary': ''}
@@ -654,64 +660,68 @@ class IntegratedNOTAMTranslator:
             return result
             
         except Exception as e:
-            self.logger.error(f"단일 통합 처리 오류: {e}")
+            self.logger.error(f"单일 통합 처리 오류: {e}")
             self.logger.error(f"오류 발생 텍스트: {notam_text[:200]}...")
             return {'translation': notam_text, 'summary': f'처리 오류: {str(e)}'}
     
-    def create_integrated_prompt(self, notams: List[str], target_language: str) -> str:
+    def create_integrated_prompt(self, notams: List[str], target_language: str, airport_code: str = None) -> str:
         """
         통합 처리용 프롬프트 생성 (번역 + 요약)
         
         Args:
             notams: NOTAM 텍스트 리스트
             target_language: 대상 언어
+            airport_code: 공항 코드 (선택사항)
             
         Returns:
             통합 프롬프트
         """
         if target_language == 'ko':
-            return self.create_korean_integrated_prompt(notams)
+            return self.create_korean_integrated_prompt(notams, airport_code)
         else:
-            return self.create_english_integrated_prompt(notams)
+            return self.create_english_integrated_prompt(notams, airport_code)
     
-    def create_korean_integrated_prompt(self, notams: List[str]) -> str:
+    def create_korean_integrated_prompt(self, notams: List[str], airport_code: str = None) -> str:
         """한국어 통합 프롬프트 생성"""
-        notams_text = "\n\n".join([f"NOTAM {i+1}:\n{notam}" for i, notam in enumerate(notams)])
+        notams_text = "\n\n".join([f"{notam}" for notam in notams])
+        
+        # 공항 코드 정보 추가 (개인화 제외)
+        airport_info = ""
         
         return f"""다음 NOTAM을 명확하고 간결한 한국어로 정리해주세요.
-
+{airport_info}
 {notams_text}
 
 요청사항:
 이 NOTAM을 사용자가 쉽게 이해할 수 있도록 구조화된 한국어로 정리해주세요.
 
 출력 형식 (정확히 이 형식을 따라주세요):
-**주요 내용:**
+주요 내용:
 [핵심 내용을 한 줄로 요약]
 
-**상세 내용:**
+상세 내용:
 
-*   [구체적인 세부사항을 항목별로 정리]
-*   [각 항목은 별도의 불릿 포인트로 구분]
+• [구체적인 세부사항을 항목별로 정리]
+• [각 항목은 별도의 불릿 포인트로 구분]
 
-**운영 지침:**
+운영 지침:
 
-*   [운영상 주의사항이나 지침]
-*   [각 지침은 별도의 불릿 포인트로 구분]
+• [운영상 주의사항이나 지침]
+• [각 지침은 별도의 불릿 포인트로 구분]
 
-**기타:**
+기타:
 
-*   [기타 중요한 정보]
-*   [각 정보는 별도의 불릿 포인트로 구분]
+• [기타 중요한 정보]
+• [각信息는 별도의 불릿 포인트로 구분]
 
 번역 규칙:
 1. 자연스러운 한국어로 번역하되 전문용어는 정확하게
 2. 시간 정보는 KST로 변환하여 표시 (예: 2025년 2월 3일 09:00)
-3. 중요한 정보는 **굵게** 표시
+3. 중요한 정보는 굵은 글씨로 표시하지 않고 자연스럽게 표현
 4. 사용자가 쉽게 이해할 수 있도록 구조화
 5. 불필요한 반복이나 어색한 표현 제거
 6. 각 섹션 사이에는 빈 줄을 넣어 가독성 향상
-7. 불릿 포인트는 "*   " 형식으로 시작
+7. 불릿 포인트는 "• " 형식으로 시작
 
 항공 전문용어 번역 (정확한 한국어 용어 사용):
 - VDGS → 차량유도도킹시스템
@@ -737,6 +747,7 @@ class IntegratedNOTAMTranslator:
 - FROM ... TO ... → ...부터 ...까지
 - DUE TO → 로 인해
 - SERVICE → 서비스
+- CEILING → 운고
 - CLOSED → 폐쇄
 - NR. → 번호
 - RWY → 활주로
@@ -751,179 +762,63 @@ class IntegratedNOTAMTranslator:
 예시:
 원문: "VDGS CLOSED DUE TO MAINTENANCE OF SERVICE FOR CONCOURSE"
 정리: 
-**주요 내용:**
-탑승동(Concourse)의 **차량유도도킹시스템(VDGS)**가 서비스 정비로 인해 폐쇄됩니다.
+주요 내용:
+탑승동(Concourse)의 차량유도도킹시스템(VDGS)가 서비스 정비로 인해 폐쇄됩니다.
 
-**상세 내용:**
+상세 내용:
 
-*   **차량유도도킹시스템(VDGS)**가 **서비스 정비**로 인해 **폐쇄**됩니다.
-*   **탑승동(Concourse)**에서의 VDGS 서비스가 중단됩니다.
+• 차량유도도킹시스템(VDGS)가 서비스 정비로 인해 폐쇄됩니다.
+• 탑승동(Concourse)에서의 VDGS 서비스가 중단됩니다.
 
-**운영 지침:**
+운영 지침:
 
-*   항공기 도킹 시 **유도요원**의 지시를 따라야 합니다.
+• 항공기 도킹 시 유도요원의 지시를 따라야 합니다.
 
-**기타:**
+기타:
 
-*   정비 완료 후 별도 공지될 예정입니다.
+• 정비 완료 후 별도 공지될 예정입니다.
 
 원문: "THE AIRCRAFT SHALL BE GUIDED BY MARSHALLER"
 정리:
-**주요 내용:**
-항공기는 **유도요원**의 지시에 따라야 합니다.
+주요 내용:
+항공기는 유도요원의 지시에 따라야 합니다.
 
-**상세 내용:**
+상세 내용:
 
-*   항공기 유도 시 **유도요원(Marshaller)**의 지시를 따라야 합니다.
+• 항공기 유도 시 유도요원(Marshaller)의 지시를 따라야 합니다.
 
-**운영 지침:**
+운영 지침:
 
-*   자동 유도 시스템 사용 불가 시 **유도요원** 지시 준수
+• 자동 유도 시스템 사용 불가 시 유도요원 지시 준수
 
-**기타:**
+기타:
 
-*   안전한 항공기 유도를 위한 필수 절차입니다.
+• 안전한 항공기 유도를 위한 필수 절차입니다.
 
 각 NOTAM을 위 형식과 용어를 사용하여 정리해주세요."""
     
-    def create_english_integrated_prompt(self, notams: List[str]) -> str:
-        """영어 통합 프롬프트 생성"""
-        notams_text = "\n\n".join([f"NOTAM {i+1}:\n{notam}" for i, notam in enumerate(notams)])
-        
-        return f"""Translate the following NOTAMs to proper English and summarize the key points of each translation.
 
+    def create_english_integrated_prompt(self, notams: List[str], airport_code: str = None) -> str:
+        """영어 통합 프롬프트 생성"""
+        notams_text = "\n\n".join([f"{notam}" for notam in notams])
+        
+        # 공항 코드 정보 추가
+        airport_info = ""
+        if airport_code and airport_code != 'UNKNOWN':
+            airport_info = f"""
+Airport Information:
+This NOTAM is about {airport_code} airport.
+"""
+        
+        return f"""NOTAM 원문을 영어로 해석해줘.
+
+{airport_info}
 {notams_text}
 
-⚠️ CRITICAL TRANSLATION RULES ⚠️
-1. ALWAYS translate ALL numbered lists completely:
-   - "1. RTE : A593 VIA SADLI" → "1. ROUTE: A593 VIA SADLI"
-   - "2. ACFT : LANDING RKRR" → "2. AIRCRAFT: LANDING RKRR"
-   - "3. PROC : FL330 AT OR BELOW AVBL" → "3. PROCEDURE: FL330 AT OR BELOW AVAILABLE"
+응답 형식:
+번역: [영어로 번역된 내용]
 
-2. Handle "FLOW CTL AS FLW" pattern:
-   - "FLOW CTL AS FLW" → "FLOW CONTROL AS FOLLOWING"
-   - Translate ALL subsequent numbered items (1. 2. 3. ...)
-   - DO NOT stop translation at numbered lists
-
-3. NEVER stop translation:
-   - Translate the entire text even if it's long
-   - Translate all numbered lists completely
-   - Handle complex structures fully
-
-Output Format:
-For each NOTAM, output in the following format:
-
-NOTAM 1:
-Translation: [Complete English translation - including ALL numbered lists]
-Summary: [Brief summary of key points]
-
-NOTAM 2:
-Translation: [Complete English translation - including ALL numbered lists]
-Summary: [Brief summary of key points]
-
-Translation Rules:
-1. Expand abbreviations and acronyms to full English words:
-   - 'FLW' → 'FOLLOWING'
-   - 'AS FLW' → 'AS FOLLOWING'
-   - 'FLOW CTL AS FLW' → 'FLOW CONTROL AS FOLLOWING'
-   - 'ACFT' → 'AIRCRAFT'
-   - 'RTE' → 'ROUTE'
-   - 'PROC' → 'PROCEDURE'
-   - 'AWY' → 'AIRWAY'
-   - 'ALTN' → 'ALTERNATE'
-   - 'REQ' → 'REQUEST'
-   - 'EXC' → 'EXCEPT'
-   - 'DEP' → 'DEPARTURE'
-   - 'ARR' → 'ARRIVAL'
-   - 'MAINT' → 'MAINTENANCE'
-   - 'NML OPS' → 'NORMAL OPERATIONS'
-   - 'U/S' → 'UNSERVICEABLE'
-   - 'STANDBY' → 'STANDBY'
-   - 'AVBL' → 'AVAILABLE'
-   - 'UNAVBL' → 'UNAVAILABLE'
-   - 'NOT AVBL' → 'NOT AVAILABLE'
-   - 'SEPARATION' → 'SEPARATION'
-   - 'SAME ALTITUDE' → 'SAME ALTITUDE'
-   - 'AT OR BELOW' → 'AT OR BELOW'
-   - 'LANDING' → 'LANDING'
-   - 'ENTERING' → 'ENTERING'
-   - 'RMK' → 'REMARK'
-   - 'WIP' → 'WORK IN PROGRESS'
-   - 'CLSD' → 'CLOSED'
-   - 'NML OPS' → 'NORMAL OPERATIONS'
-   - 'TEL' → 'TELEPHONE'
-   - 'PSN' → 'POSITION'
-   - 'HGT' → 'HEIGHT'
-   - 'RADIUS' → 'RADIUS'
-   - 'OBST' → 'OBSTACLE'
-   - 'FIREWORKS' → 'FIREWORKS'
-   - 'NPA' → 'NON-PRECISION APPROACH'
-   - 'PBN' → 'PERFORMANCE BASED NAVIGATION'
-   - 'RNAV' → 'AREA NAVIGATION'
-   - 'RNP' → 'REQUIRED NAVIGATION PERFORMANCE'
-
-2. Translation Examples:
-   Example 1:
-   Original: "FLOW CTL AS FLW 1. RTE : A593 VIA SADLI 2. ACFT : LANDING RKRR 3. PROC : FL330 AT OR BELOW AVBL"
-   Translation: "FLOW CONTROL AS FOLLOWING 1. ROUTE: A593 VIA SADLI 2. AIRCRAFT: LANDING RKRR 3. PROCEDURE: FL330 AT OR BELOW AVAILABLE"
-   
-   Example 2:
-   Original: "RWY 15L/33R CLSD DUE TO WIP RMK: TWY L, TWY K, TWY E, TWY J, TWY G NML OPS"
-   Translation: "RWY 15L/33R CLOSED DUE TO WORK IN PROGRESS REMARK: TWY L, TWY K, TWY E, TWY J, TWY G NORMAL OPERATIONS"
-
-3. Keep the following terms as is (aviation standards):
-   - NOTAM, AIRAC, AIP, SUP, AMDT, WEF, TIL, UTC
-   - GPS, RAIM, PBN, RNAV, RNP
-   - RWY, TWY, APRON, TAXI, SID, STAR, IAP
-   - SFC, AMSL, AGL, MSL
-   - All coordinates, frequencies, measurements
-   - All dates and times in original format
-   - Airport codes (RKSI, RJJJ, etc.)
-
-3. Improve grammar and sentence structure:
-   - Fix incomplete sentences
-   - Add proper articles (a, an, the)
-   - Use proper verb tenses
-   - Make sentences clear and readable
-
-4. Translate specific aviation terms:
-   - 'CLOSED' → 'CLOSED'
-   - 'PAVEMENT CONSTRUCTION' → 'PAVEMENT CONSTRUCTION'
-   - 'OUTAGES' → 'OUTAGES'
-   - 'PREDICTED FOR' → 'PREDICTED FOR'
-   - 'WILL TAKE PLACE' → 'WILL TAKE PLACE'
-   - 'ESTABLISHMENT OF' → 'ESTABLISHMENT OF'
-   - 'INFORMATION OF' → 'INFORMATION OF'
-   - 'CIRCLE' → 'CIRCLE'
-   - 'CENTERED' → 'CENTERED'
-   - 'DUE TO' → 'DUE TO'
-
-Summary Rules:
-1. NEVER include the following:
-   - Time information (dates, times, periods, UTC)
-   - Document references (AIRAC, AIP, AMDT, SUP)
-   - Phrases like "New information is available", "Information regarding", "Information about"
-   - Airport names
-   - Coordinates
-   - Unnecessary parentheses or special characters
-   - Redundant words and phrases
-
-2. Focus on:
-   - Key changes or impacts
-   - Specific details about changes
-   - Reasons for changes
-
-3. Keep it concise and clear:
-   - Make it as short as possible
-   - Use direct and active voice
-   - Include only essential information
-
-4. For runway directions:
-   - Always use "L/R" format (e.g., "RWY 15 L/R")
-   - Do not translate "L/R" to "LEFT/RIGHT"
-   - Keep the space between runway number and L/R
-
-Please provide translation and summary for each NOTAM in the specified format."""
+요약: [핵심 내용 요약]"""
     
     def parse_integrated_response(self, response: str, notam_count: int) -> List[Dict[str, str]]:
         """
@@ -939,20 +834,20 @@ Please provide translation and summary for each NOTAM in the specified format.""
         results = []
         
         # 한국어 응답인 경우 전체를 번역으로 처리
-        if '**주요 내용:**' in response or '**상세 내용:**' in response:
+        if '주요 내용:' in response or '상세 내용:' in response:
             # 한국어 구조화된 응답 파싱
             translation = response.strip()
             summary = ""
             
             # 주요 내용에서 요약 추출
-            if '**주요 내용:**' in response:
+            if '주요 내용:' in response:
                 lines = response.split('\n')
                 for i, line in enumerate(lines):
-                    if '**주요 내용:**' in line:
+                    if '주요 내용:' in line:
                         # 다음 비어있지 않은 줄이 요약
                         for j in range(i + 1, len(lines)):
                             next_line = lines[j].strip()
-                            if next_line and not next_line.startswith('**'):
+                            if next_line and not next_line.startswith('상세 내용:') and not next_line.startswith('운영 지침:') and not next_line.startswith('기타:'):
                                 summary = next_line.replace('*', '').strip()
                                 break
                         break
@@ -961,6 +856,16 @@ Please provide translation and summary for each NOTAM in the specified format.""
                 'translation': translation,
                 'summary': summary
             })
+            return results
+        
+        # 영어 응답 중간에 간단한 처리 추가
+        if translated_sections_count > 0:
+            # 파싱된 결과 리스트
+            for i in range(translated_sections_count):
+                results.append({
+                    'translation': translated_sections[i],
+                    'summary': 'Translation completed'
+                })
             return results
         
         # 기존 영어 응답 파싱 로직
@@ -993,7 +898,7 @@ Please provide translation and summary for each NOTAM in the specified format.""
                 continue
             
             # 번역 섹션 감지
-            if line.startswith('번역:') or line.startswith('Translation:'):
+            if line.startswith('번역:') or line.startswith('Translation:') or line.startswith('Translated NOTAM:'):
                 in_translation = True
                 in_summary = False
                 current_translation = line.split(':', 1)[1].strip() if ':' in line else ""
@@ -1021,10 +926,26 @@ Please provide translation and summary for each NOTAM in the specified format.""
         
         # 결과가 부족하면 기본값으로 채움
         while len(results) < notam_count:
-            results.append({
-                'translation': '번역 실패',
-                'summary': '요약 실패'
-            })
+            # 영어 응답의 경우 전체 응답을 번역으로 사용
+            if len(results) == 0 and response.strip():
+                full_response = response.strip()
+                # 첫 번째 줄이 번역 내용일 가능성이 높음
+                first_line = full_response.split('\n')[0].strip()
+                if first_line and not first_line.startswith('Summary:'):
+                    results.append({
+                        'translation': first_line,
+                        'summary': 'Complete translation'
+                    })
+                else:
+                    results.append({
+                        'translation': '번역 실패',
+                        'summary': '요약 실패'
+                    })
+            else:
+                results.append({
+                    'translation': '번역 실패',
+                    'summary': '요약 실패'
+                })
         
         # 결과가 너무 많으면 잘라냄
         results = results[:notam_count]

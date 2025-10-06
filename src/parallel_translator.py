@@ -342,6 +342,7 @@ class ParallelHybridNOTAMTranslator:
 11. 반드시 전체 텍스트를 끝까지 번역하세요
 12. "FLOW CTL AS FLW"는 "흐름 통제는 다음과 같습니다"로 번역하세요
 13. 번호 목록의 각 항목을 개별적으로 번역하세요 (예: "1. RTE : A593 VIA SADLI" → "1. 노선: A593 VIA SADLI")
+14. "CEILING"은 반드시 "운고"로 번역하세요
 
 원문: {processed_text}
 

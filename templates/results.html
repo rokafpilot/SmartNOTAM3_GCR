@@ -196,8 +196,7 @@
             </div>
         </div>
 
-
-        <!-- 요약 정보 -->
+        <!-- 공항 필터링 결과 -->
         <div class="alert alert-info" id="filterStatus">
             전체 NOTAM: {{ notams|length }}개 (시간 필터링 비활성화 - 모든 NOTAM 표시)
             {% if all_airports %}
@@ -206,6 +205,46 @@
                 <span class="badge bg-secondary me-1">{{ airport }}</span>
             {% endfor %}
             {% endif %}
+        </div>
+
+        <!-- 루트 입력 카드 -->
+        <div class="card mb-3">
+            <div class="card-body">
+                <h6 class="card-title">
+                    <i class="fas fa-route me-2"></i>루트 입력
+                </h6>
+                <div class="row">
+                    <div class="col-md-8">
+                        <div class="mb-3">
+                            <label for="routeInput" class="form-label">항로 입력</label>
+                            <textarea class="form-control" id="routeInput" rows="3" 
+                                placeholder="예: ROUTE 1: BOPTA Z51 BEDES Y711 MUGUS Y742 SALMI Q11 TACLE B591 HCN G86 KAPLI MADRU SULUX IGLEG IKELA A1 BUNT2M.RW35B"></textarea>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="d-flex flex-column justify-content-end h-100">
+                            <button type="button" class="btn btn-primary mb-2" id="analyzeRouteBtn">
+                                <i class="fas fa-search me-2"></i>ROUTE NOTAM 요약
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="clearRouteBtn">
+                                <i class="fas fa-eraser me-1"></i>초기화
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="row mt-3" id="routeAnalysisResult" style="display: none;">
+                    <div class="col-md-12">
+                        <div class="alert alert-info">
+                            <h6 class="alert-heading">
+                                <i class="fas fa-info-circle me-2"></i>루트 분석 결과
+                            </h6>
+                            <div id="routeAnalysisContent">
+                                <!-- 분석 결과가 여기에 표시됩니다 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- NOTAM 목록 -->
@@ -386,7 +425,7 @@
     <footer class="bg-light mt-5 py-4">
         <div class="container text-center">
             <p class="text-muted mb-0">
-                Smart NOTAM &copy; 2025. 항공 정보 번역 시스템
+                SmartNOTAM &copy; 2025. SH Smart NOTAM System
             </p>
         </div>
     </footer>
@@ -683,6 +722,21 @@
                 // 모든 NOTAM 표시
                 showAllNotams();
             }
+
+            // 루트 분석 관련 이벤트 리스너 설정
+            document.getElementById('analyzeRouteBtn').addEventListener('click', function() {
+                analyzeRoute();
+            });
+
+            document.getElementById('clearRouteBtn').addEventListener('click', function() {
+                clearRoute();
+            });
+
+            document.getElementById('routeInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter' && e.ctrlKey) {
+                    analyzeRoute();
+                }
+            });
         });
 
         // 공항 필터 UI 렌더링
@@ -809,6 +863,311 @@
         // 구글지도 새 창 열기
         function openGoogleMaps() {
             window.open('/google_maps', '_blank', 'width=1200,height=800,scrollbars=yes,resizable=yes');
+        }
+
+        // 루트 분석 관련 함수들
+
+        function analyzeRoute() {
+            const routeInput = document.getElementById('routeInput').value.trim();
+            
+            if (!routeInput) {
+                alert('항로를 입력해주세요.');
+                return;
+            }
+
+            // 로딩 상태 표시
+            const analyzeBtn = document.getElementById('analyzeRouteBtn');
+            const originalText = analyzeBtn.innerHTML;
+            analyzeBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>분석 중...';
+            analyzeBtn.disabled = true;
+
+            // 루트 분석 로직
+            const analysisResult = performRouteAnalysis(routeInput);
+            
+            // 결과 표시
+            displayRouteAnalysis(analysisResult);
+
+            // 버튼 상태 복원
+            analyzeBtn.innerHTML = originalText;
+            analyzeBtn.disabled = false;
+        }
+
+        function performRouteAnalysis(route) {
+            // 입력된 루트에서 주요 지점들 추출
+            const routePoints = extractRoutePoints(route);
+            
+            // 현재 NOTAM 데이터에서 관련 NOTAM 찾기
+            const relevantNotams = findRelevantNotams(routePoints);
+            
+            // 분석 결과 생성
+            return {
+                route: route,
+                routePoints: routePoints,
+                relevantNotams: relevantNotams,
+                analysis: generateRouteAnalysis(relevantNotams)
+            };
+        }
+
+        function extractRoutePoints(route) {
+            // 루트에서 주요 지점들 추출 (공항 코드, 항로 지점 등)
+            const points = [];
+            
+            // 공항 코드 패턴 (4글자 대문자)
+            const airportPattern = /\b([A-Z]{4})\b/g;
+            let match;
+            while ((match = airportPattern.exec(route)) !== null) {
+                points.push({
+                    type: 'airport',
+                    code: match[1],
+                    position: match.index
+                });
+            }
+
+            // 항로 지점 패턴 (3-5글자 대문자)
+            const waypointPattern = /\b([A-Z]{3,5})\b/g;
+            while ((match = waypointPattern.exec(route)) !== null) {
+                // 공항 코드가 아닌 경우만 추가
+                if (!points.some(p => p.code === match[1])) {
+                    points.push({
+                        type: 'waypoint',
+                        code: match[1],
+                        position: match.index
+                    });
+                }
+            }
+
+            return points;
+        }
+
+        function findRelevantNotams(routePoints) {
+            const relevantNotams = [];
+            const notamItems = document.querySelectorAll('.notam-item');
+            
+            notamItems.forEach((item, index) => {
+                const notamText = item.querySelector('.notam-text').textContent;
+                const airportBadges = item.querySelectorAll('.badge.bg-info');
+                const notamAirports = Array.from(airportBadges).map(badge => badge.textContent.trim());
+                
+                // 루트 지점과 관련된 NOTAM 찾기
+                let isRelevant = false;
+                let relevanceReasons = [];
+
+                // 공항 코드 매칭
+                routePoints.forEach(point => {
+                    if (point.type === 'airport' && notamAirports.includes(point.code)) {
+                        isRelevant = true;
+                        relevanceReasons.push(`공항 ${point.code} 관련`);
+                    }
+                });
+
+                // 항로 지점 매칭
+                routePoints.forEach(point => {
+                    if (point.type === 'waypoint' && notamText.includes(point.code)) {
+                        isRelevant = true;
+                        relevanceReasons.push(`항로 지점 ${point.code} 관련`);
+                    }
+                });
+
+                // 특정 키워드 매칭 (GPS, RAIM, FLOW CTL 등)
+                const keywords = ['GPS', 'RAIM', 'FLOW CTL', 'RADAR', 'VOR', 'DME', 'NDB'];
+                keywords.forEach(keyword => {
+                    if (notamText.includes(keyword)) {
+                        isRelevant = true;
+                        relevanceReasons.push(`${keyword} 관련`);
+                    }
+                });
+
+                if (isRelevant) {
+                    relevantNotams.push({
+                        index: index + 1,
+                        notamNumber: item.querySelector('td').textContent,
+                        airports: notamAirports,
+                        text: notamText.substring(0, 200) + '...',
+                        relevanceReasons: relevanceReasons
+                    });
+                }
+            });
+
+            return relevantNotams;
+        }
+
+        function generateRouteAnalysis(relevantNotams) {
+            if (relevantNotams.length === 0) {
+                return "입력된 항로와 직접적으로 관련된 NOTAM을 찾을 수 없습니다.";
+            }
+
+            // Package 3 공항들을 동적으로 가져오기
+            const packageAirports = {{ package_airports|tojson|safe if package_airports else 'null' }};
+            const package3Airports = packageAirports && packageAirports.package3 ? packageAirports.package3 : [];
+            
+            // Package 3 관련 NOTAM만 필터링
+            const package3Notams = relevantNotams.filter(notam => {
+                return notam.airports.some(airport => package3Airports.includes(airport));
+            });
+
+            let analysis = `<strong>Package 3 관련 NOTAM 상세 분석</strong><br><br>`;
+            analysis += `<div class="alert alert-primary mb-3">
+                <strong>📋 분석 대상 공항:</strong> ${package3Airports.join(', ')}<br>
+                <strong>🛣️ 항로:</strong> ${document.getElementById('routeInput').value}
+            </div>`;
+
+            if (package3Notams.length === 0) {
+                analysis += `<div class="alert alert-warning">
+                    <strong>⚠️ 주의:</strong> Package 3 공항들과 직접적으로 관련된 NOTAM을 찾을 수 없습니다.
+                </div>`;
+                return analysis;
+            }
+
+            analysis += `제시된 항로를 기준으로 검토했을 때, 아래 NOTAM들이 해당됩니다.<br><br>`;
+
+            // NOTAM별 상세 분석
+            package3Notams.forEach((notam, index) => {
+                const notamText = notam.text.toLowerCase();
+                const notamNumber = notam.notamNumber;
+                const airports = notam.airports.join(', ');
+                
+                analysis += `<div class="card mb-3">`;
+                analysis += `<div class="card-header">`;
+                analysis += `<h6 class="mb-0">NOTAM #${notam.index} (${notamNumber})</h6>`;
+                analysis += `<small class="text-muted">관련 공항: ${airports}</small>`;
+                analysis += `</div>`;
+                analysis += `<div class="card-body">`;
+
+                // NOTAM 내용에 따른 상세 분석
+                if (notamText.includes('flow ctl') || notamText.includes('sadli')) {
+                    analysis += `<div class="alert alert-info">
+                        <strong>✅ 해당:</strong> 이 항로는 한국(RKSI)에서 출발하여 중국 영공을 통과합니다. 
+                        NOTAM에 명시된 SADLI 지점은 항로에 직접 포함되지 않더라도, 
+                        인천과 상하이 ACC 간의 주요 관제 이관 지점이므로 항로상에서 관제 이양 절차가 적용될 가능성이 매우 높습니다.
+                    </div>`;
+                } else if (notamText.includes('gps') || notamText.includes('raim')) {
+                    analysis += `<div class="alert alert-warning">
+                        <strong>✅ 해당:</strong> 이륙 공항이 RKSI(인천)이므로, 비행 초반에 인천 FIR 내에서 GPS 신호 불안정 현상을 겪을 수 있습니다. 
+                        비행 중 GPS 신호에만 의존하지 않도록 주의해야 합니다.
+                    </div>`;
+                } else if (notamText.includes('bopta') || notamText.includes('ponik')) {
+                    analysis += `<div class="alert alert-warning">
+                        <strong>✅ 해당:</strong> 이 항로는 BOPTA 지점에서 시작됩니다. 
+                        이 NOTAM은 BOPTA에서 PONIK까지의 조건부 항로(CDR2)에 대한 내용이므로, 
+                        비행 계획에 따라 해당 항로를 사용한다면 명시된 시간 및 고도 제한을 반드시 준수해야 합니다.
+                    </div>`;
+                } else if (notamText.includes('eastbound') || notamText.includes('ikeka')) {
+                    analysis += `<div class="alert alert-secondary">
+                        <strong>❌ 해당 없음:</strong> 이 NOTAM은 상하이에서 인천으로 진입하는 동쪽행(Eastbound) 항공기에 대한 지침입니다. 
+                        출발지 RKSI에서 목적지 VVDN으로 향하는 비행은 방향이 다르므로 이 NOTAM은 해당되지 않습니다.
+                    </div>`;
+                } else if (notamText.includes('frng') || notamText.includes('firing') || notamText.includes('prohibited')) {
+                    analysis += `<div class="alert alert-danger">
+                        <strong>✅ 해당:</strong> 목적지 VVDN(다낭)은 베트남에 위치해 있습니다. 
+                        이 항로는 베트남 영공을 통과하게 되므로, 
+                        <strong>훈련 구역의 좌표와 고도(3,200피트/4,500피트)</strong>를 반드시 확인하여 
+                        항로가 훈련 구역과 겹치지 않도록 주의해야 합니다.
+                    </div>`;
+                } else if (notamText.includes('vor') || notamText.includes('dme') || notamText.includes('ndb')) {
+                    analysis += `<div class="alert alert-info">
+                        <strong>ℹ️ 정보:</strong> 항로상의 항행 보조 시설 관련 정보입니다. 
+                        해당 시설의 사용 가능 여부를 확인하고 필요시 대체 절차를 준비하세요.
+                    </div>`;
+                } else if (notamText.includes('radar') || notamText.includes('ads-b')) {
+                    analysis += `<div class="alert alert-info">
+                        <strong>ℹ️ 정보:</strong> 관제 서비스 관련 정보입니다. 
+                        해당 구역에서의 관제 절차와 요구사항을 확인하세요.
+                    </div>`;
+                } else {
+                    analysis += `<div class="alert alert-light">
+                        <strong>📋 일반 정보:</strong> 항로 계획 시 참고할 일반적인 정보입니다.
+                    </div>`;
+                }
+
+                analysis += `<div class="mt-2">
+                    <small class="text-muted">
+                        <strong>NOTAM 내용:</strong> ${notam.text.substring(0, 150)}...
+                    </small>
+                </div>`;
+
+                analysis += `</div></div>`;
+            });
+
+            // 최종 요약 테이블
+            analysis += `<div class="card mt-4">
+                <div class="card-header">
+                    <h6 class="mb-0">📊 최종 요약</h6>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>NOTAM 번호</th>
+                                <th>주요 내용</th>
+                                <th>ROUTE 관련 여부</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+
+            package3Notams.forEach(notam => {
+                const notamText = notam.text.toLowerCase();
+                let relevance = '';
+                let relevanceClass = '';
+
+                if (notamText.includes('flow ctl') || notamText.includes('sadli')) {
+                    relevance = '관제 이양 지점 확인 필요';
+                    relevanceClass = 'table-info';
+                } else if (notamText.includes('gps') || notamText.includes('raim')) {
+                    relevance = 'RKSI 출발이므로 해당';
+                    relevanceClass = 'table-warning';
+                } else if (notamText.includes('bopta') || notamText.includes('ponik')) {
+                    relevance = 'BOPTA 지점 포함';
+                    relevanceClass = 'table-warning';
+                } else if (notamText.includes('eastbound') || notamText.includes('ikeka')) {
+                    relevance = '해당 없음 (방향이 다름)';
+                    relevanceClass = 'table-secondary';
+                } else if (notamText.includes('frng') || notamText.includes('firing')) {
+                    relevance = '베트남 영공 통과';
+                    relevanceClass = 'table-danger';
+                } else {
+                    relevance = '정보성 NOTAM';
+                    relevanceClass = 'table-light';
+                }
+
+                analysis += `<tr class="${relevanceClass}">
+                    <td>NOTAM #${notam.index} (${notam.notamNumber})</td>
+                    <td>${notam.text.substring(0, 80)}...</td>
+                    <td>${relevance}</td>
+                </tr>`;
+            });
+
+            analysis += `</tbody></table>
+                </div>
+            </div>`;
+
+            // 권장사항
+            analysis += `<div class="alert alert-success mt-3">
+                <h6 class="alert-heading">🎯 권장사항</h6>
+                <ul class="mb-0">
+                    <li>중요도가 높은 NOTAM들을 우선적으로 검토하세요.</li>
+                    <li>항로상의 각 지점별로 해당 NOTAM의 영향을 평가하세요.</li>
+                    <li>대체 항로나 절차가 필요한지 확인하세요.</li>
+                    <li>특히 베트남 영공의 사격 훈련 구역을 반드시 회피하세요.</li>
+                </ul>
+            </div>`;
+
+            return analysis;
+        }
+
+        function displayRouteAnalysis(result) {
+            const resultDiv = document.getElementById('routeAnalysisResult');
+            const contentDiv = document.getElementById('routeAnalysisContent');
+            
+            contentDiv.innerHTML = result.analysis;
+            resultDiv.style.display = 'block';
+            
+            // 결과 섹션으로 스크롤
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function clearRoute() {
+            document.getElementById('routeInput').value = '';
+            document.getElementById('routeAnalysisResult').style.display = 'none';
         }
     </script>
 </body>

@@ -374,6 +374,7 @@ Translated text:"""
    - 중복된 표현 제거
    - 띄어쓰기 오류 없도록 주의
    - "DUE TO"는 항상 "로 인해"로 번역하고 "TO"를 추가하지 않음
+   - "CEILING"은 반드시 "운고"로 번역
 
 원문:
 {e_section}
@@ -635,10 +636,16 @@ class NOTAMFilter:
                 return {}
         
         # 추가 체크: 공항 정보로 보이는 특별한 패턴들
+        # 단, NOTAM 번호가 있는 경우에는 진짜 NOTAM일 가능성이 높으므로 관대하게 처리
+        has_notam_number = re.search(r'\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}\s+[A-Z0-9]+/\d{2}', cleaned_text)
         if cleaned_text.count('RWY') > 3 or cleaned_text.count('CAT') > 2:
             if len(cleaned_text) > 800:  # 매우 긴 경로 정보나 성능 정보
-                self.logger.debug(f"매우 긴 공항 성능 정보 감지하여 건너뛰기: {cleaned_text[:100]}...")
-                return {}
+                # NOTAM 번호가 있는 경우에는 건너뛰지 않음
+                if not has_notam_number:
+                    self.logger.debug(f"매우 긴 공항 성능 정보 감지하여 건너뛰기: {cleaned_text[:100]}...")
+                    return {}
+                else:
+                    self.logger.debug(f"NOTAM 번호가 있으므로 길이 제한 예외 적용: {cleaned_text[:100]}...")
 
         # ICAO 공항 코드 추출 (더 유연한 패턴)
         # 예: 28JUN25 00:00 - 25SEP25 23:59 LOWW A1483/25
@@ -1351,6 +1358,100 @@ class NOTAMFilter:
         self.logger.info(f"패키지 NOTAM 최종 {len(filtered_notams)}개의 NOTAM 추출 완료")
         return filtered_notams
 
+    def extract_package_airports(self, text, all_airports):
+        """PDF 텍스트에서 Package별 공항 정보를 추출하고 순서를 동적으로 설정"""
+        import re
+        
+        package_airports = {}
+        
+        # Package 1 정보 추출 - DEP, DEST, ALTN 라인에서 공항 코드 추출
+        package1_airports = []
+        
+        # DEP 라인에서 공항 코드 추출
+        dep_match = re.search(r'DEP:\s*([A-Z]{4})', text)
+        if dep_match:
+            package1_airports.append(dep_match.group(1))
+        
+        # DEST 라인에서 공항 코드 추출
+        dest_match = re.search(r'DEST:\s*([A-Z]{4})', text)
+        if dest_match:
+            package1_airports.append(dest_match.group(1))
+        
+        # ALTN 라인에서 공항 코드 추출 (여러 개 가능)
+        altn_match = re.search(r'ALTN:\s*([A-Z\s]+?)(?=\n|$)', text)
+        if altn_match:
+            altn_airports = re.findall(r'[A-Z]{4}', altn_match.group(1))
+            package1_airports.extend(altn_airports)
+        
+        # 실제 존재하는 공항만 필터링 (추출한 순서 유지)
+        existing_package1 = [airport for airport in package1_airports if airport in all_airports]
+        
+        # Package 1 정의상 포함되어야 하는 공항들 중 누락된 것 추가 (순서 유지)
+        expected_package1 = ['RKSI', 'VVDN', 'VVCR']
+        for airport in expected_package1:
+            if airport in package1_airports and airport not in existing_package1:
+                existing_package1.append(airport)
+                
+        if existing_package1:
+            package_airports['package1'] = existing_package1
+            # 동적으로 추출된 순서로 package_airport_order 업데이트
+            self.package_airport_order['package1'] = existing_package1
+        
+        # Package 2 정보 추출 - 다양한 ERA 패턴에서 공항 코드 추출
+        package2_airports = []
+        
+        # 다양한 ERA 패턴들 처리 (3% ERA, 5% ERA, ERA 등)
+        era_patterns = [
+            r'\d+%\s*ERA:\s*([A-Z\s]+?)(?=\n[A-Z]{2,}:\s*|\n=+|\n\[|$)',  # 3% ERA, 5% ERA 등
+            r'ERA:\s*([A-Z\s]+?)(?=\n[A-Z]{2,}:\s*|\n=+|\n\[|$)'  # 일반 ERA
+        ]
+        
+        for pattern in era_patterns:
+            era_matches = re.findall(pattern, text, re.DOTALL)
+            for era_match in era_matches:
+                era_airports = re.findall(r'[A-Z]{4}', era_match)
+                package2_airports.extend(era_airports)
+        
+        # REFILE 라인에서 공항 코드 추출 (있는 경우)
+        refile_match = re.search(r'REFILE:\s*([A-Z\s]+?)(?=\n[A-Z]{2,}:\s*|\n=+|\n\[|$)', text, re.DOTALL)
+        if refile_match:
+            refile_airports = re.findall(r'[A-Z]{4}', refile_match.group(1))
+            package2_airports.extend(refile_airports)
+        
+        # EDTO 라인에서 공항 코드 추출 (있는 경우)
+        edto_match = re.search(r'EDTO:\s*([A-Z\s]+?)(?=\n[A-Z]{2,}:\s*|\n=+|\n\[|$)', text, re.DOTALL)
+        if edto_match:
+            edto_airports = re.findall(r'[A-Z]{4}', edto_match.group(1))
+            package2_airports.extend(edto_airports)
+        
+        # 중복 제거 및 실제 존재하는 공항만 필터링 (추출한 순서 유지)
+        package2_airports = list(set(package2_airports))
+        existing_package2 = [airport for airport in package2_airports if airport in all_airports]
+        if existing_package2:
+            package_airports['package2'] = existing_package2
+            # 동적으로 추출된 순서로 package_airport_order 업데이트
+            self.package_airport_order['package2'] = existing_package2
+        
+        # Package 3 정보 추출 - FIR 라인에서 공항 코드 추출
+        package3_airports = []
+        
+        # FIR 라인에서 공항 코드 추출
+        fir_match = re.search(r'FIR:\s*([A-Z\s]+?)(?=\n[A-Z]{2,}:\s*|\n=+|\n\[|$)', text, re.DOTALL)
+        if fir_match:
+            fir_airports = re.findall(r'[A-Z]{4}', fir_match.group(1))
+            package3_airports.extend(fir_airports)
+        
+        # 실제 존재하는 공항만 필터링 (추출한 순서 유지)
+        existing_package3 = [airport for airport in package3_airports if airport in all_airports]
+        if existing_package3:
+            package_airports['package3'] = existing_package3
+            # 동적으로 추출된 순서로 package_airport_order 업데이트
+            self.package_airport_order['package3'] = existing_package3
+        
+        self.logger.info(f"추출된 Package별 공항 (동적 순서): {package_airports}")
+        self.logger.info(f"업데이트된 package_airport_order: {self.package_airport_order}")
+        return package_airports
+
     def _merge_package_notam_lines(self, text):
         """패키지 NOTAM 라인 병합 (pdf_to_txt_test_package.py 기반)"""
         lines = text.split('\n')
@@ -1415,13 +1516,23 @@ class NOTAMFilter:
         section_start_pattern = r'^\[.*\]'
         notam_id_pattern = r'^[A-Z]{4}(?:\s+(?!COAD)[A-Z]+)?\s*\d{1,3}/\d{2}$|^[A-Z]{4}\s+[A-Z]\d{4}/\d{2}$'
         coad_pattern = r'^[A-Z]{4}\s+COAD\d{2}/\d{2}$'  # COAD NOTAM 패턴 추가
+        aip_ad_pattern = r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:UFN|PERM)\s+[A-Z]{4}\s+AIP\s+AD\s+\d+\.\d+'  # AIP AD 패턴 추가
         
         # 새로운 NOTAM 시작을 감지하는 더 정확한 패턴들
         new_notam_patterns = [
-            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}\s+[A-Z]\d{4}/\d{2}',  # 일반 NOTAM
-            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}\s+AIP\s+SUP\s+\d+/\d{2}',  # AIP SUP
-            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}\s+Z\d{4}/\d{2}',  # Z NOTAM
-            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}\s+COAD\d{2}/\d{2}',  # COAD
+            # COAD 패턴들 - 숫자 접두사가 있는 형식
+            r'^\d+\.\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*UFN\s+[A-Z]{4}\s+COAD\d{2}/\d{2}',  # UFN 형식
+            r'^\d+\.\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*PERM\s+[A-Z]{4}\s+COAD\d{2}/\d{2}',  # PERM 형식  
+            r'^\d+\.\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s+[A-Z]{4}\s+COAD\d{2}/\d{2}',  # 온전한 날짜 형식
+            # 일반 NOTAM 패턴들
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)\s+[A-Z]{4}\s+[A-Z]\d{4}/\d{2}',  # 일반 NOTAM - UFN/PERM 추가
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)\s+[A-Z]{4}\s+AIP\s+SUP\s+\d+/\d{2}',  # AIP SUP
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)\s+[A-Z]{4}\s+AIP\s+AD\s+\d+\.\d+',  # AIP AD (예: AIP AD 2.9)
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)\s+[A-Z]{4}\s+Z\d{4}/\d{2}',  # Z NOTAM
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)\s+[A-Z]{4}\s+COAD\d{2}/\d{2}',  # COAD
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*UFN\s+[A-Z]{4}\s+CHINA\s+SUP\s+\d+/\d{2}',  # CHINA SUP 패턴 추가
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:[A-Z]{3}\d{2}|UFN|PERM)\s+[A-Z]{4}\s+[A-Z]+\d+/\d{2}',  # 더 일반적인 패턴 추가
+            r'^\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s+[A-Z]{4}\s+[A-Z]\d{4}/\d{2}',  # 연속 날짜 패턴
         ]
         
         end_phrase_pattern = r'ANY CHANGE WILL BE NOTIFIED BY NOTAM\.'
@@ -1457,9 +1568,13 @@ class NOTAMFilter:
             # 새로운 NOTAM 시작 감지 (더 정확한 패턴 사용)
             is_new_notam = False
             for pattern in new_notam_patterns:
-                if re.match(pattern, line):
+                if re.match(pattern, line.strip()):
                     is_new_notam = True
                     break
+            
+            # AIP AD 패턴도 체크
+            if not is_new_notam and re.match(aip_ad_pattern, line.strip()):
+                is_new_notam = True
             
             if is_new_notam:
                 # 현재 NOTAM이 있으면 저장하고 새로 시작

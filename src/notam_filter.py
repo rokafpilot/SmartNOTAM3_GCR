@@ -15,14 +15,20 @@ from typing import Dict, List, Optional
 # 환경 변수 로드
 load_dotenv()
 
-# Google API 키 설정
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-if not GOOGLE_API_KEY:
-    raise ValueError("GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.")
-
-# Gemini 모델 설정
-genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash-lite')
+# Google API 키 설정 (선택사항)
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
+if GOOGLE_API_KEY:
+    try:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        model = genai.GenerativeModel('gemini-2.5-flash-lite')
+        GEMINI_AVAILABLE = True
+    except Exception as e:
+        print(f"GEMINI 설정 실패: {e}")
+        GEMINI_AVAILABLE = False
+        model = None
+else:
+    GEMINI_AVAILABLE = False
+    model = None
 
 # 색상 패턴 정의
 RED_STYLE_TERMS = [

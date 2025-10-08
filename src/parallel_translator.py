@@ -119,9 +119,18 @@ class ParallelHybridNOTAMTranslator:
     
     def extract_e_section(self, notam_text: str) -> str:
         """NOTAM 텍스트에서 E 섹션만 추출합니다."""
+        # E 섹션 패턴 매칭 (더 포괄적인 버전)
         e_section_patterns = [
+            # 패턴 1: E) 이후 다음 NOTAM 시작 전까지 (가장 포괄적)
+            r'E\)\s*(.+?)(?=\n\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4})',
+            # 패턴 2: E) 이후 구분선 전까지
+            r'E\)\s*(.+?)(?=\n\s*={20,}\s*$)',
+            # 패턴 3: E) 이후 다른 섹션 전까지
+            r'E\)\s*(.+?)(?=\n\s*[A-Z]\)\s*[A-Z])',
+            # 패턴 4: E) 이후 문서 끝까지 (마지막 NOTAM인 경우)
+            r'E\)\s*(.+?)$',
+            # 패턴 5: 기존 패턴들 (폴백)
             r'E\)\s*(.*?)(?=\s*[A-Z]\)|$)',
-            r'E\)\s*(.*?)(?=\s*[A-Z][A-Z]\)|$)',
             r'E\)\s*(.*?)(?=\s*RMK|$)',
             r'E\)\s*(.*?)(?=\s*COMMENT|$)',
         ]
@@ -134,7 +143,7 @@ class ParallelHybridNOTAMTranslator:
                 e_section = re.sub(r'RMK:.*$', '', e_section, flags=re.DOTALL).strip()
                 e_section = re.sub(r'COMMENT\).*$', '', e_section, flags=re.DOTALL).strip()
                 
-                if e_section:
+                if e_section and len(e_section) > 5:  # 의미있는 내용이 있는 경우만 반환
                     return e_section
         
         # E 섹션이 없는 경우, 핵심 내용만 추출

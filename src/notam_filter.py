@@ -765,12 +765,30 @@ class NOTAMFilter:
                 break
         
         
-        # E) 필드 추출 - 더 유연한 종료 조건 사용
-        e_field_match = re.search(r'E\)\s*(.+?)(?=(?:\n|^)\s*={20,}\s*$|(?:\n|^)\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}|(?:\n|^)\s*=+\s*$|(?:\n|^)={20,}(?:\n|$)|$)', cleaned_text, re.DOTALL)
-        if e_field_match:
-            e_field = e_field_match.group(1).strip()
+        # E) 필드 추출 - 더 포괄적인 패턴 사용
+        e_field_patterns = [
+            # 패턴 1: E) 이후 다음 NOTAM 시작 전까지 (가장 포괄적)
+            r'E\)\s*(.+?)(?=\n\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4})',
+            # 패턴 2: E) 이후 구분선 전까지
+            r'E\)\s*(.+?)(?=\n\s*={20,}\s*$)',
+            # 패턴 3: E) 이후 문서 끝까지 (마지막 NOTAM인 경우)
+            r'E\)\s*(.+?)$',
+            # 패턴 4: E) 이후 다른 섹션(F), G) 등) 전까지
+            r'E\)\s*(.+?)(?=\n\s*[A-Z]\)\s*[A-Z])',
+        ]
+        
+        e_field = None
+        for pattern in e_field_patterns:
+            e_field_match = re.search(pattern, cleaned_text, re.DOTALL)
+            if e_field_match:
+                e_field = e_field_match.group(1).strip()
+                break
+        
+        if e_field:
             # NO CURRENT NOTAMS FOUND 이후의 내용 제거
             e_field = re.sub(r'\*{8}\s*NO CURRENT NOTAMS FOUND\s*\*{8}.*$', '', e_field, flags=re.DOTALL | re.IGNORECASE).strip()
+            # CREATED: 이후의 메타데이터 제거
+            e_field = re.sub(r'CREATED:.*$', '', e_field, flags=re.DOTALL).strip()
             # E) 필드에 색상 스타일 적용
             e_field = apply_color_styles(e_field)
             parsed_notam['e_field'] = e_field

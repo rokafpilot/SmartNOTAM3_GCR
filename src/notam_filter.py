@@ -30,6 +30,142 @@ else:
     GEMINI_AVAILABLE = False
     model = None
 
+# NOTAM 카테고리 매핑 (아이콘과 색깔 포함)
+NOTAM_CATEGORIES = {
+    'RUNWAY': {
+        'keywords': ['runway', 'rw', '활주로', '착륙', '이륙', 'landing', 'takeoff'],
+        'q_codes': ['Q) RW', 'Q) RWY'],
+        'icon': '🛬',
+        'color': '#dc3545',  # 빨간색 (위험/중요)
+        'bg_color': '#f8d7da'
+    },
+    'TAXIWAY': {
+        'keywords': ['taxiway', 'tw', 'twy', '택시웨이', '유도로', 'movement area'],
+        'q_codes': ['Q) TW', 'Q) TWY'],
+        'icon': '🛣️',
+        'color': '#fd7e14',  # 주황색
+        'bg_color': '#fff3cd'
+    },
+    'APRON': {
+        'keywords': ['apron', 'ramp', 'gate', 'docking', 'mars', '계류장', '게이트', '접현', '도킹', 'lead-in line', 'vdgs'],
+        'q_codes': ['Q) APRON', 'Q) RAMP'],
+        'icon': '🅿️',
+        'color': '#6f42c1',  # 보라색
+        'bg_color': '#e2d9f3'
+    },
+    'LIGHT': {
+        'keywords': ['light', 'lighting', 'lgt', '조명', '등화', 'beacon', 'approach light', 'runway light'],
+        'q_codes': ['Q) LGT', 'Q) LIGHT'],
+        'icon': '💡',
+        'color': '#ffc107',  # 노란색
+        'bg_color': '#fff3cd'
+    },
+    'APPROACH': {
+        'keywords': ['approach', 'app', '접근', 'ils', 'vor', 'ndb', 'gps approach', 'precision approach'],
+        'q_codes': ['Q) APP', 'Q) ILS', 'Q) VOR', 'Q) NDB'],
+        'icon': '📡',
+        'color': '#20c997',  # 청록색
+        'bg_color': '#d1ecf1'
+    },
+    'DEPARTURE': {
+        'keywords': ['departure procedure', 'dep procedure', 'sid', 'standard instrument departure', '출발 절차', '이륙 절차'],
+        'q_codes': ['Q) DEP', 'Q) SID'],
+        'icon': '✈️',
+        'color': '#0dcaf0',  # 하늘색
+        'bg_color': '#cff4fc'
+    },
+    'GPS': {
+        'keywords': ['gps', 'gnss', 'raim', 'gps approach', 'gps outage', 'gps unavailable'],
+        'q_codes': ['Q) GPS', 'Q) GNSS', 'Q) RAIM'],
+        'icon': '🛰️',
+        'color': '#198754',  # 녹색
+        'bg_color': '#d1e7dd'
+    },
+    'OBSTRUCTION': {
+        'keywords': ['obstacle', 'obstruction', 'obstacles', 'obstructions', '장애물', '장애물 구역'],
+        'q_codes': ['Q) OBST', 'Q) OBSTRUCTION'],
+        'icon': '⚠️',
+        'color': '#dc3545',  # 빨간색 (위험)
+        'bg_color': '#f8d7da'
+    },
+    'NAVAID': {
+        'keywords': ['navaid', 'navigation aid', 'vor', 'ndb', 'ils', 'dme', 'tacan', '항행보조시설'],
+        'q_codes': ['Q) NAVAID', 'Q) VOR', 'Q) NDB', 'Q) ILS', 'Q) DME'],
+        'icon': '📶',
+        'color': '#6c757d',  # 회색
+        'bg_color': '#e9ecef'
+    },
+    'COMMUNICATION': {
+        'keywords': ['communication', 'comm', 'radio', 'frequency', '통신', '주파수', 'frequency change'],
+        'q_codes': ['Q) COMM', 'Q) FREQ'],
+        'icon': '📻',
+        'color': '#0d6efd',  # 파란색
+        'bg_color': '#cfe2ff'
+    },
+    'AIRWAY': {
+        'keywords': ['airway', 'route', 'air route', '항로', '항공로', 'enroute'],
+        'q_codes': ['Q) AWY', 'Q) AIRWAY'],
+        'icon': '🗺️',
+        'color': '#fd7e14',  # 주황색
+        'bg_color': '#fff3cd'
+    },
+    'AIRSPACE': {
+        'keywords': ['airspace', 'air space', 'controlled airspace', 'airspace restriction', '공역', '제한공역'],
+        'q_codes': ['Q) AIRSPACE'],
+        'icon': '🌐',
+        'color': '#6f42c1',  # 보라색
+        'bg_color': '#e2d9f3'
+    },
+    'AIP': {
+        'keywords': ['aip', 'aeronautical information publication', '항공정보간행물'],
+        'q_codes': ['Q) AIP'],
+        'icon': '📋',
+        'color': '#6c757d',  # 회색
+        'bg_color': '#e9ecef'
+    }
+}
+
+def analyze_notam_category(notam_text, q_code=None):
+    """NOTAM 텍스트와 Q-code를 분석하여 카테고리 결정"""
+    if not notam_text:
+        return 'OTHER'
+    
+    # 텍스트를 소문자로 변환하여 분석
+    text_lower = notam_text.lower()
+    
+    # Q-code가 있으면 우선적으로 사용
+    if q_code:
+        q_code_upper = q_code.upper()
+        for category, data in NOTAM_CATEGORIES.items():
+            for q_pattern in data['q_codes']:
+                if q_pattern.upper() in q_code_upper:
+                    return category
+    
+    # 키워드 기반 분석 (가중치 적용)
+    category_scores = {}
+    for category, data in NOTAM_CATEGORIES.items():
+        score = 0
+        for keyword in data['keywords']:
+            keyword_lower = keyword.lower()
+            # 정확한 단어 매칭 (단어 경계 고려)
+            if re.search(r'\b' + re.escape(keyword_lower) + r'\b', text_lower):
+                # 중요한 키워드는 더 높은 가중치
+                if keyword_lower in ['gate', 'docking', 'mars', 'apron', 'ramp', 'vdgs']:
+                    score += 3
+                elif keyword_lower in ['runway', 'taxiway', 'approach', 'departure']:
+                    score += 2
+                else:
+                    score += 1
+        category_scores[category] = score
+    
+    # 가장 높은 점수의 카테고리 반환
+    if category_scores:
+        best_category = max(category_scores.items(), key=lambda x: x[1])[0]
+        if category_scores[best_category] > 0:
+            return best_category
+    
+    return 'OTHER'
+
 # 색상 패턴 정의
 RED_STYLE_TERMS = [
     'closed', 'close', 'closing','obstacle','obstacles','obstacle area','obstruction','obstructions',
@@ -841,8 +977,8 @@ class NOTAMFilter:
     def _parse_time_info(self, notam_text, parsed_notam):
         """시간 정보 파싱 (UFN 지원 포함)"""
         
-        # 1. UFN (Until Further Notice) 패턴 먼저 확인 (번호 포함)
-        ufn_pattern = r'(?:\d+\.\s+)?(\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2}) - UFN'
+        # 1. UFN (Until Further Notice) 패턴 먼저 확인 (번호 포함) - Package 3 NOTAM 형식 지원
+        ufn_pattern = r'(?:\d+\.\s+)?(\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2}) - UFN(?:\s+[A-Z]{4}(?:\s+[A-Z\s]+/\d{2})?)?'
         ufn_match = re.search(ufn_pattern, notam_text)
         
         if ufn_match:
@@ -870,8 +1006,8 @@ class NOTAMFilter:
             except Exception as e:
                 print(f"UFN 시간 파싱 오류: {e}")
         
-        # 2. WEF/TIL 패턴 (번호 포함)
-        wef_til_pattern = r'(?:\d+\.\s+)?(\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2}) - (\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2})'
+        # 2. WEF/TIL 패턴 (번호 포함) - Package 3 NOTAM 형식 지원
+        wef_til_pattern = r'(?:\d+\.\s+)?(\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2}) - (\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2})(?:\s+[A-Z]{4}(?:\s+[A-Z0-9]+/\d{2})?)?'
         wef_til_match = re.search(wef_til_pattern, notam_text)
         
         if wef_til_match:
@@ -1286,6 +1422,14 @@ class NOTAMFilter:
                 # 원문에도 색상 스타일 적용
                 styled_section = apply_color_styles(e_field_content)
                 
+                # NOTAM 카테고리 분석
+                category = analyze_notam_category(e_field_content, parsed_notam.get('q_code'))
+                category_info = NOTAM_CATEGORIES.get(category, {
+                    'icon': '📄',
+                    'color': '#6c757d',
+                    'bg_color': '#e9ecef'
+                })
+                
                 notam_dict = {
                     'id': parsed_notam.get('notam_number', 'Unknown'),
                     'notam_number': parsed_notam.get('notam_number', 'Unknown'),
@@ -1295,7 +1439,11 @@ class NOTAMFilter:
                     'description': description,
                     'original_text': styled_section,
                     'd_field': parsed_notam.get('d_field', ''),
-                    'e_field': parsed_notam.get('e_field', '')
+                    'e_field': parsed_notam.get('e_field', ''),
+                    'category': category,
+                    'category_icon': category_info['icon'],
+                    'category_color': category_info['color'],
+                    'category_bg_color': category_info['bg_color']
                 }
 
                 # UFN을 포함한 모든 시간 정보에 대해 local_time_display 생성
@@ -1408,6 +1556,14 @@ class NOTAMFilter:
                 self.logger.debug(f"원문 추출 - NOTAM: {parsed_notam.get('notam_number')}, 원본 길이: {len(section)}, 추출된 길이: {len(original_content)}")
                 styled_original = apply_color_styles(original_content)
                 
+                # NOTAM 카테고리 분석
+                category = analyze_notam_category(original_content, parsed_notam.get('q_code'))
+                category_info = NOTAM_CATEGORIES.get(category, {
+                    'icon': '📄',
+                    'color': '#6c757d',
+                    'bg_color': '#e9ecef'
+                })
+                
                 notam_dict = {
                     'id': parsed_notam.get('notam_number', 'Unknown'),
                     'notam_number': parsed_notam.get('notam_number', 'Unknown'),
@@ -1416,7 +1572,11 @@ class NOTAMFilter:
                     'expiry_time': parsed_notam.get('expiry_time', ''),
                     'description': parsed_notam.get('e_field', section),
                     'original_text': styled_original,
-                    'd_field': parsed_notam.get('d_field', '')  # D) 필드 추가
+                    'd_field': parsed_notam.get('d_field', ''),
+                    'category': category,
+                    'category_icon': category_info['icon'],
+                    'category_color': category_info['color'],
+                    'category_bg_color': category_info['bg_color']
                 }
 
                 # UFN을 포함한 모든 시간 정보에 대해 local_time_display 생성

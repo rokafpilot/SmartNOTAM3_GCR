@@ -297,7 +297,14 @@
                         {% elif notam.airport_code %}
                             <span class="badge bg-info ms-2">{{ notam.airport_code }}</span>
                         {% endif %}
-                        <span class="badge bg-success float-end notam-status">활성</span>
+                        <span class="badge float-end notam-status" 
+                              data-category="{{ notam.category or 'OTHER' }}"
+                              data-category-icon="{{ notam.category_icon or '📄' }}"
+                              data-category-color="{{ notam.category_color or '#6c757d' }}"
+                              data-category-bg-color="{{ notam.category_bg_color or '#e9ecef' }}"
+                              style="background-color: {{ notam.category_bg_color or '#e9ecef' }}; color: {{ notam.category_color or '#6c757d' }}; border: 1px solid {{ notam.category_color or '#6c757d' }};">
+                            {{ notam.category_icon or '📄' }} {{ notam.category or 'OTHER' }}
+                        </span>
                     </h5>
                 </div>
                 <div class="card-body">
@@ -634,8 +641,18 @@
                 // 개별 NOTAM 카드 표시/숨김
                 if (isVisible) {
                     item.style.display = 'block';
-                    item.querySelector('.notam-status').textContent = '활성';
-                    item.querySelector('.notam-status').className = 'badge bg-success float-end notam-status';
+                    const statusBadge = item.querySelector('.notam-status');
+                    const category = statusBadge.dataset.category || 'OTHER';
+                    const categoryIcon = statusBadge.dataset.categoryIcon || '📄';
+                    const categoryColor = statusBadge.dataset.categoryColor || '#6c757d';
+                    const categoryBgColor = statusBadge.dataset.categoryBgColor || '#e9ecef';
+                    
+                    statusBadge.innerHTML = `${categoryIcon} ${category}`;
+                    statusBadge.dataset.category = category;
+                    statusBadge.style.backgroundColor = categoryBgColor;
+                    statusBadge.style.color = categoryColor;
+                    statusBadge.style.border = `1px solid ${categoryColor}`;
+                    statusBadge.className = 'badge float-end notam-status';
                     visibleCount++;
                 } else {
                     item.style.display = 'none';
@@ -649,8 +666,14 @@
                 });
             });
 
-            document.getElementById('filterStatus').textContent = 
-                `필터링 결과: ${visibleCount}개 NOTAM이 시간 범위에 포함됨 (전체: ${totalNotams}개)`;
+            const totalNotams = notamItems.length;
+            
+            // 필터링 상태 업데이트
+            const filterStatusContent = document.getElementById('filterStatusContent');
+            if (filterStatusContent) {
+                filterStatusContent.innerHTML = 
+                    `필터링 결과: <strong style="color: #dc3545;">${visibleCount}개</strong> NOTAM이 시간 범위에 포함됨 (전체: ${totalNotams}개)`;
+            }
             
             // 통합 탭 상태 업데이트
             document.getElementById('summaryFilterStatus').textContent = 
@@ -661,8 +684,18 @@
             const notamItems = document.querySelectorAll('.notam-item');
             notamItems.forEach((item, index) => {
                 item.style.display = 'block';
-                item.querySelector('.notam-status').textContent = '표시됨';
-                item.querySelector('.notam-status').className = 'badge bg-info float-end notam-status';
+                const statusBadge = item.querySelector('.notam-status');
+                const category = statusBadge.dataset.category || 'OTHER';
+                const categoryIcon = statusBadge.dataset.categoryIcon || '📄';
+                const categoryColor = statusBadge.dataset.categoryColor || '#6c757d';
+                const categoryBgColor = statusBadge.dataset.categoryBgColor || '#e9ecef';
+                
+                statusBadge.innerHTML = `${categoryIcon} ${category}`;
+                statusBadge.dataset.category = category;
+                statusBadge.style.backgroundColor = categoryBgColor;
+                statusBadge.style.color = categoryColor;
+                statusBadge.style.border = `1px solid ${categoryColor}`;
+                statusBadge.className = 'badge float-end notam-status';
                 
                 // 통합 탭 섹션의 모든 NOTAM 항목도 표시
                 const notamIndex = index + 1;
@@ -672,8 +705,14 @@
                 });
             });
 
-            document.getElementById('filterStatus').textContent = 
-                `전체 NOTAM: ${totalNotams}개 (시간 필터링 비활성화 - 모든 NOTAM 표시)`;
+            const totalNotams = notamItems.length;
+            
+            // 필터링 상태 업데이트
+            const filterStatusContent = document.getElementById('filterStatusContent');
+            if (filterStatusContent) {
+                filterStatusContent.innerHTML = 
+                    `전체 NOTAM: <strong style="color: #198754;">${totalNotams}개</strong> (시간 필터링 비활성화 - 모든 NOTAM 표시)`;
+            }
             
             // 통합 탭 상태 업데이트
             document.getElementById('summaryFilterStatus').textContent = 
@@ -843,10 +882,19 @@
                     item.style.display = 'block';
                     visibleCount++;
                     
-                    // 상태 업데이트
+                    // 상태 업데이트 - 카테고리 정보 유지
                     const statusBadge = item.querySelector('.notam-status');
-                    statusBadge.textContent = '표시됨';
-                    statusBadge.className = 'badge bg-success float-end notam-status';
+                    // 원래 카테고리 정보를 유지하되 표시 상태만 변경
+                    const originalCategory = statusBadge.dataset.category || 'OTHER';
+                    const categoryIcon = statusBadge.dataset.categoryIcon || '📄';
+                    const categoryColor = statusBadge.dataset.categoryColor || '#6c757d';
+                    const categoryBgColor = statusBadge.dataset.categoryBgColor || '#e9ecef';
+                    
+                    statusBadge.innerHTML = `${categoryIcon} ${originalCategory}`;
+                    statusBadge.style.backgroundColor = categoryBgColor;
+                    statusBadge.style.color = categoryColor;
+                    statusBadge.style.border = `1px solid ${categoryColor}`;
+                    statusBadge.className = 'badge float-end notam-status';
                 } else {
                     item.style.display = 'none';
                     

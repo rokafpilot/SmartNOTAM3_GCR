@@ -7,7 +7,7 @@ import re
 # NOTAM 시작 패턴
 NOTAM_START_PATTERNS = {
     'airport': re.compile(r'^(\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-|[A-Z]{4}(?:\s+[A-Z]+)?\s*\d{1,3}/\d{2}$|[A-Z]{4}\s+[A-Z]\d{4}/\d{2}$|[A-Z]{4}\s+COAD\d{2}/\d{2}$)'),
-    'package': re.compile(r"^\s*(?:E\))?\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)\s+[A-Z]{4}(?:\s+AIP\s+(?:SUP|AD))?\s+[A-Z0-9\.]+/\d{2}")
+    'package': re.compile(r"^\s*(?:E\))?\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN|PERM)(?:\s+[A-Z]{4}(?:\s+[A-Z0-9]+/\d{2})?)?")
 }
 
 # 섹션 종료 패턴

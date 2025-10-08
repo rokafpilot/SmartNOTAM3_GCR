@@ -91,15 +91,35 @@
 <body>
     <div class="container">
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h1>NOTAM 목록</h1>
+            <div>
+                <h1>
+                    NOTAM 목록
+                    {% if saved_mode %}
+                        <span class="badge bg-success ms-2">저장된 데이터</span>
+                    {% endif %}
+                </h1>
+                <p class="text-muted mb-0">총 {{ notams|length }}개의 NOTAM이 처리되었습니다.</p>
+            </div>
             <div class="d-flex gap-2">
+                {% if not saved_mode %}
+                <button type="button" class="btn btn-success" onclick="saveNotams()">
+                    <i class="fas fa-save me-2"></i>
+                    저장
+                </button>
+                {% endif %}
                 <a href="{{ url_for('index') }}" class="btn btn-primary">
                     새 파일 업로드
                 </a>
-                <button type="button" class="btn btn-success" onclick="openGoogleMaps()">
+                <button type="button" class="btn btn-info" onclick="openGoogleMaps()">
                     <i class="fas fa-map-marked-alt me-2"></i>
                     구글지도
                 </button>
+                {% if saved_mode %}
+                <a href="/saved" class="btn btn-outline-secondary">
+                    <i class="fas fa-list me-2"></i>
+                    저장 목록
+                </a>
+                {% endif %}
             </div>
         </div>
         
@@ -953,6 +973,133 @@
                 throw error;
             }
         }
+
+        // 저장 기능
+        async function saveNotams() {
+            const saveName = prompt('저장할 이름을 입력하세요:', `NOTAM_${new Date().toLocaleDateString('ko-KR').replace(/\./g, '')}`);
+            
+            if (!saveName) return;
+            
+            try {
+                // 현재 NOTAM 데이터 수집
+                const notamData = collectCurrentNotamData();
+                
+                const response = await fetch('/api/save_notams', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        notams: notamData,
+                        package_airports: {{ package_airports | tojson }},
+                        all_airports: {{ all_airports | tojson }},
+                        save_name: saveName
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(data.message);
+                } else {
+                    alert('저장 중 오류가 발생했습니다: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Save error:', error);
+                alert('저장 중 오류가 발생했습니다.');
+            }
+        }
+
+        // 오프라인 필터링 기능 (저장된 NOTAM에서도 작동)
+        function applyOfflineFilters() {
+            const airportFilter = document.getElementById('airportFilter');
+            const timeFilterSwitch = document.getElementById('timeFilterSwitch');
+            
+            let visibleCount = 0;
+            const notamItems = document.querySelectorAll('.notam-item');
+            
+            notamItems.forEach((item, index) => {
+                let isVisible = true;
+                
+                // 공항 필터 적용
+                if (airportFilter && airportFilter.value) {
+                    const selectedAirport = airportFilter.value;
+                    const airportBadges = item.querySelectorAll('.badge.bg-info');
+                    const airports = Array.from(airportBadges).map(badge => badge.textContent.trim());
+                    
+                    if (!airports.includes(selectedAirport)) {
+                        isVisible = false;
+                    }
+                }
+                
+                // 시간 필터 적용 (저장된 모드에서도 작동)
+                if (timeFilterSwitch && timeFilterSwitch.checked) {
+                    const startDate = document.getElementById('startDate').value;
+                    const endDate = document.getElementById('endDate').value;
+                    const startTime = document.getElementById('startTime').value;
+                    const endTime = document.getElementById('endTime').value;
+                    
+                    if (startDate && endDate && startTime && endTime) {
+                        const filterStart = new Date(startDate + 'T' + startTime);
+                        const filterEnd = new Date(endDate + 'T' + endTime);
+                        
+                        const effectiveTime = item.dataset.effectiveTime;
+                        const expiryTime = item.dataset.expiryTime;
+                        
+                        if (effectiveTime && expiryTime && effectiveTime !== 'UFN' && expiryTime !== 'UFN') {
+                            try {
+                                let notamStart, notamEnd;
+                                
+                                if (effectiveTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/)) {
+                                    notamStart = new Date(effectiveTime);
+                                } else if (effectiveTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
+                                    notamStart = new Date(effectiveTime + 'Z');
+                                } else if (effectiveTime.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)) {
+                                    notamStart = new Date(effectiveTime.replace(' ', 'T') + ':00Z');
+                                } else {
+                                    notamStart = new Date(effectiveTime);
+                                }
+                                
+                                if (expiryTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/)) {
+                                    notamEnd = new Date(expiryTime);
+                                } else if (expiryTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
+                                    notamEnd = new Date(expiryTime + 'Z');
+                                } else if (expiryTime.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)) {
+                                    notamEnd = new Date(expiryTime.replace(' ', 'T') + ':00Z');
+                                } else {
+                                    notamEnd = new Date(expiryTime);
+                                }
+                                
+                                // 시간 겹침 확인
+                                if (notamEnd < filterStart || notamStart > filterEnd) {
+                                    isVisible = false;
+                                }
+                            } catch (error) {
+                                console.warn(`NOTAM ${index + 1} 시간 파싱 오류:`, error);
+                            }
+                        }
+                    }
+                }
+                
+                // 표시/숨김 적용
+                item.style.display = isVisible ? '' : 'none';
+                if (isVisible) visibleCount++;
+            });
+            
+            // 결과 표시
+            const resultText = document.getElementById('filterResult');
+            if (resultText) {
+                resultText.textContent = `${visibleCount}개의 NOTAM이 표시됩니다.`;
+                resultText.style.display = 'block';
+            }
+        }
+
+        // 저장된 모드에서는 오프라인 필터 사용
+        {% if saved_mode %}
+        function applyTimeFilter() {
+            applyOfflineFilters();
+        }
+        {% endif %}
 
         function collectCurrentNotamData() {
             const notamItems = document.querySelectorAll('.notam-item');

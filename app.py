@@ -102,9 +102,35 @@ hybrid_translator = HybridNOTAMTranslator()
 parallel_translator = ParallelHybridNOTAMTranslator()
 integrated_translator = IntegratedNOTAMTranslator()
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+@app.route('/saved')
+def saved_notams():
+    """저장된 NOTAM 목록 페이지"""
+    return render_template('saved_notams.html')
+
+@app.route('/saved/<save_name>')
+def view_saved_notam(save_name):
+    """저장된 특정 NOTAM 보기"""
+    try:
+        saved_notams = load_saved_notams()
+        
+        if save_name not in saved_notams:
+            flash(f'저장된 NOTAM "{save_name}"을 찾을 수 없습니다.', 'error')
+            return redirect(url_for('saved_notams'))
+        
+        notam_data = saved_notams[save_name]
+        
+        return render_template('results.html', 
+                             notams=notam_data['notams'],
+                             current_date=datetime.now().strftime('%Y-%m-%d'),
+                             all_airports=sorted(notam_data['all_airports']),
+                             package_airports=notam_data['package_airports'],
+                             saved_mode=True,
+                             save_name=save_name)
+        
+    except Exception as e:
+        logger.error(f"저장된 NOTAM 보기 중 오류: {str(e)}")
+        flash(f'저장된 NOTAM을 불러오는 중 오류가 발생했습니다: {str(e)}', 'error')
+        return redirect(url_for('saved_notams'))
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -289,25 +315,136 @@ def analyze_route():
         data = request.get_json()
         route = data.get('route', '').strip()
         notam_data = data.get('notam_data', [])
-        
+
         if not route:
             return jsonify({'error': '항로를 입력해주세요.'}), 400
-        
+
         logger.info(f"분석할 항로: {route}")
         logger.info(f"NOTAM 데이터 개수: {len(notam_data)}")
-        
+
         # GEMINI를 사용한 루트 분석
         analysis_result = analyze_route_with_gemini(route, notam_data)
-        
+
         return jsonify({
             'route': route,
             'analysis': analysis_result,
             'timestamp': datetime.now().isoformat()
         })
-        
+
     except Exception as e:
         logger.error(f"루트 분석 중 오류: {str(e)}")
         return jsonify({'error': f'루트 분석 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/save_notams', methods=['POST'])
+def save_notams():
+    """NOTAM 결과를 로컬에 저장"""
+    try:
+        data = request.get_json()
+        notams = data.get('notams', [])
+        package_airports = data.get('package_airports', {})
+        all_airports = data.get('all_airports', [])
+        save_name = data.get('save_name', '').strip()
+        
+        if not save_name:
+            save_name = f"NOTAM_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # 저장할 데이터 구조
+        save_data = {
+            'save_name': save_name,
+            'timestamp': datetime.now().isoformat(),
+            'notams': notams,
+            'package_airports': package_airports,
+            'all_airports': all_airports,
+            'total_count': len(notams)
+        }
+        
+        # 저장된 NOTAM 목록에 추가
+        saved_notams = load_saved_notams()
+        saved_notams[save_name] = save_data
+        
+        # 파일에 저장
+        save_saved_notams(saved_notams)
+        
+        logger.info(f"NOTAM 저장 완료: {save_name} ({len(notams)}개)")
+        
+        return jsonify({
+            'success': True,
+            'save_name': save_name,
+            'message': f'{len(notams)}개의 NOTAM이 "{save_name}"으로 저장되었습니다.'
+        })
+        
+    except Exception as e:
+        logger.error(f"NOTAM 저장 중 오류: {str(e)}")
+        return jsonify({'error': f'NOTAM 저장 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/load_saved_notams', methods=['GET'])
+def load_saved_notams_api():
+    """저장된 NOTAM 목록 조회"""
+    try:
+        saved_notams = load_saved_notams()
+        
+        # 메타데이터만 반환 (실제 NOTAM 데이터는 제외)
+        metadata = {}
+        for name, data in saved_notams.items():
+            metadata[name] = {
+                'save_name': data.get('save_name', name),
+                'timestamp': data.get('timestamp', ''),
+                'total_count': data.get('total_count', 0),
+                'package_airports': data.get('package_airports', {}),
+                'all_airports': data.get('all_airports', [])
+            }
+        
+        return jsonify({
+            'success': True,
+            'saved_notams': metadata
+        })
+        
+    except Exception as e:
+        logger.error(f"저장된 NOTAM 조회 중 오류: {str(e)}")
+        return jsonify({'error': f'저장된 NOTAM 조회 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/load_notam/<save_name>', methods=['GET'])
+def load_notam(save_name):
+    """특정 저장된 NOTAM 데이터 로드"""
+    try:
+        saved_notams = load_saved_notams()
+        
+        if save_name not in saved_notams:
+            return jsonify({'error': '저장된 NOTAM을 찾을 수 없습니다.'}), 404
+        
+        notam_data = saved_notams[save_name]
+        
+        return jsonify({
+            'success': True,
+            'notam_data': notam_data
+        })
+        
+    except Exception as e:
+        logger.error(f"NOTAM 로드 중 오류: {str(e)}")
+        return jsonify({'error': f'NOTAM 로드 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/delete_saved_notam/<save_name>', methods=['DELETE'])
+def delete_saved_notam(save_name):
+    """저장된 NOTAM 삭제"""
+    try:
+        saved_notams = load_saved_notams()
+        
+        if save_name not in saved_notams:
+            return jsonify({'error': '저장된 NOTAM을 찾을 수 없습니다.'}), 404
+        
+        del saved_notams[save_name]
+        save_saved_notams(saved_notams)
+        
+        logger.info(f"NOTAM 삭제 완료: {save_name}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'"{save_name}" NOTAM이 삭제되었습니다.'
+        })
+        
+    except Exception as e:
+        logger.error(f"NOTAM 삭제 중 오류: {str(e)}")
+        return jsonify({'error': f'NOTAM 삭제 중 오류가 발생했습니다: {str(e)}'}), 500
 
 def analyze_route_with_gemini(route, notam_data):
     """GEMINI를 사용한 루트 분석 - NOTAM과 항로 연관성 중심"""
@@ -388,7 +525,7 @@ def format_notam_data_for_analysis(notam_data):
     """NOTAM 데이터를 분석용 문자열로 변환"""
     if not notam_data:
         return "현재 NOTAM 데이터가 없습니다."
-    
+
     formatted_text = "NOTAM 목록:\n\n"
     for notam in notam_data:
         formatted_text += f"NOTAM #{notam['index']}: {notam['notam_number']}\n"
@@ -396,8 +533,35 @@ def format_notam_data_for_analysis(notam_data):
         formatted_text += f"유효시간: {notam['effective_time']} - {notam['expiry_time']}\n"
         formatted_text += f"내용: {notam['text']}\n"
         formatted_text += "---\n"
-    
+
     return formatted_text
+
+def load_saved_notams():
+    """저장된 NOTAM 데이터 로드"""
+    try:
+        saved_file = os.path.join('data', 'saved_notams.json')
+        if os.path.exists(saved_file):
+            with open(saved_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+    except Exception as e:
+        logger.error(f"저장된 NOTAM 로드 중 오류: {str(e)}")
+        return {}
+
+def save_saved_notams(saved_notams):
+    """NOTAM 데이터를 파일에 저장"""
+    try:
+        # data 디렉토리 생성
+        os.makedirs('data', exist_ok=True)
+        
+        saved_file = os.path.join('data', 'saved_notams.json')
+        with open(saved_file, 'w', encoding='utf-8') as f:
+            json.dump(saved_notams, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"NOTAM 데이터 저장 완료: {saved_file}")
+    except Exception as e:
+        logger.error(f"NOTAM 데이터 저장 중 오류: {str(e)}")
+        raise
 
 @app.route('/api/extract_airports', methods=['POST'])
 def extract_airports():

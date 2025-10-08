@@ -388,8 +388,11 @@ Translated text:"""
 번역문:"""
         
         # Gemini API 호출
-        response = model.generate_content(prompt)
-        translated_text = response.text.strip()
+        if model and GEMINI_AVAILABLE:
+            response = model.generate_content(prompt)
+            translated_text = response.text.strip()
+        else:
+            translated_text = "GEMINI API를 사용할 수 없습니다."
         
         # "CREATED:" 이후의 텍스트 제거
         translated_text = re.sub(r'\s*CREATED:.*$', '', translated_text)
@@ -472,6 +475,9 @@ class NOTAMFilter:
         # 공항 데이터 로드
         self.airports_data = self._load_airports_data()
         
+        # 시간대 캐시 (성능 최적화)
+        self.timezone_cache = {}
+        
     def _detect_package_type(self, text):
         """텍스트에서 패키지 타입을 감지"""
         if 'KOREAN AIR NOTAM PACKAGE 1' in text:
@@ -496,9 +502,8 @@ class NOTAMFilter:
         """공항 데이터 로드"""
         airports_data = {}
         try:
-            # SmartNOTAMgemini_GCR 폴더의 공항 데이터 사용
-            csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 
-                                  'SmartNOTAMgemini_GCR', 'AirportsDatawithUTCTimeZones copy.csv')
+            # src 폴더의 공항 데이터 사용
+            csv_path = os.path.join(os.path.dirname(__file__), 'airports_timezones.csv')
             
             if os.path.exists(csv_path):
                 with open(csv_path, 'r', encoding='utf-8-sig') as f:
@@ -522,19 +527,48 @@ class NOTAMFilter:
                                 'utc_offset': utc_offset
                             }
             else:
-                print(f"공항 데이터 파일을 찾을 수 없습니다: {csv_path}")
+                print(f"Airport data file not found: {csv_path}")
                 
         except Exception as e:
-            print(f"공항 데이터 로드 중 오류: {e}")
+            print(f"Error loading airport data: {e}")
             
         return airports_data
     
     def get_timezone(self, airport_code):
-        """공항 코드에 따른 타임존 정보 반환"""
-        if airport_code in self.airports_data:
-            return self.airports_data[airport_code].get('utc_offset', '+00:00')
+        """공항 코드에 따른 타임존 정보 반환 (캐싱 적용)"""
+        # 캐시 확인
+        if airport_code in self.timezone_cache:
+            return self.timezone_cache[airport_code]
         
-        # 기본 타임존 설정 (ICAO 코드 첫 글자 기준)
+        timezone_result = self._calculate_timezone(airport_code)
+        
+        # 캐시에 저장
+        self.timezone_cache[airport_code] = timezone_result
+        
+        return timezone_result
+    
+    def _calculate_timezone(self, airport_code):
+        """실제 시간대 계산 (캐싱 없이)"""
+        # 1단계: CSV 데이터에서 정확한 시간대 조회
+        if airport_code in self.airports_data:
+            csv_timezone = self.airports_data[airport_code].get('utc_offset', '+00:00')
+            # DST 적용 여부 확인
+            return self._apply_dst_if_needed(airport_code, csv_timezone)
+        
+        # 2단계: 고급 시간대 시스템 사용 시도 (API 비활성화로 성능 향상)
+        try:
+            from src.icao import get_utc_offset
+            advanced_timezone = get_utc_offset(airport_code, use_api=False)  # API 비활성화
+            if advanced_timezone and advanced_timezone != "UTC+0":
+                # UTC+9 -> +09:00 형식으로 변환
+                if advanced_timezone.startswith('UTC+'):
+                    return '+' + advanced_timezone[4:] + ':00'
+                elif advanced_timezone.startswith('UTC-'):
+                    return '-' + advanced_timezone[4:] + ':00'
+        except Exception as e:
+            print(f"Advanced timezone system failed: {e}")
+        
+        # 3단계: 기본 타임존 설정 (ICAO 코드 첫 글자 기준)
         if airport_code.startswith('RK'):  # 한국
             return '+09:00'
         elif airport_code.startswith('RJ'):  # 일본
@@ -559,6 +593,45 @@ class NOTAMFilter:
                 return '-06:00'  # 기본 중부 시간대
         else:
             return '+00:00'  # UTC
+    
+    def _apply_dst_if_needed(self, airport_code, timezone_offset):
+        """DST가 필요한 공항에 대해 서머타임 적용"""
+        # DST가 적용되는 지역들 (미국, 캐나다, 유럽 등)
+        dst_regions = ['K', 'C', 'E', 'L']  # 미국, 캐나다, 유럽
+        
+        if airport_code[0] in dst_regions:
+            try:
+                # 간단한 DST 판단 (3월~10월)
+                from datetime import datetime
+                current_month = datetime.now().month
+                dst_active = 3 <= current_month <= 10
+                
+                if dst_active:
+                    # CSV의 값이 이미 DST 적용된 값이므로 그대로 사용
+                    return timezone_offset
+                else:
+                    # 표준 시간으로 변환 (DST 비활성화 시)
+                    if timezone_offset.startswith('-'):
+                        # 음수 시간대에서 1시간 빼기 (표준 시간으로)
+                        offset_hours = int(timezone_offset[1:3])
+                        offset_minutes = int(timezone_offset[4:6])
+                        new_hours = offset_hours - 1
+                        if new_hours < 0:
+                            new_hours = 0
+                        return f"-{new_hours:02d}:{offset_minutes:02d}"
+                    elif timezone_offset.startswith('+'):
+                        # 양수 시간대에서 1시간 빼기 (표준 시간으로)
+                        offset_hours = int(timezone_offset[1:3])
+                        offset_minutes = int(timezone_offset[4:6])
+                        new_hours = offset_hours - 1
+                        if new_hours < 0:
+                            new_hours = 0
+                        return f"+{new_hours:02d}:{offset_minutes:02d}"
+            
+            except Exception as e:
+                print(f"DST application error: {e}")
+        
+        return timezone_offset
     
     def _clean_additional_info(self, notam_text):
         """NOTAM에서 추가 정보 제거"""

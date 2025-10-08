@@ -2,7 +2,7 @@
 Smart NOTAM3 - 시간 필터링과 로컬시간 변환이 적용된 NOTAM 처리 애플리케이션
 """
 
-from flask import Flask, request, render_template, jsonify, redirect, url_for, flash
+from flask import Flask, request, render_template, jsonify, redirect, url_for, flash, send_file
 from werkzeug.utils import secure_filename
 import os
 import subprocess
@@ -102,35 +102,9 @@ hybrid_translator = HybridNOTAMTranslator()
 parallel_translator = ParallelHybridNOTAMTranslator()
 integrated_translator = IntegratedNOTAMTranslator()
 
-@app.route('/saved')
-def saved_notams():
-    """저장된 NOTAM 목록 페이지"""
-    return render_template('saved_notams.html')
-
-@app.route('/saved/<save_name>')
-def view_saved_notam(save_name):
-    """저장된 특정 NOTAM 보기"""
-    try:
-        saved_notams = load_saved_notams()
-        
-        if save_name not in saved_notams:
-            flash(f'저장된 NOTAM "{save_name}"을 찾을 수 없습니다.', 'error')
-            return redirect(url_for('saved_notams'))
-        
-        notam_data = saved_notams[save_name]
-        
-        return render_template('results.html', 
-                             notams=notam_data['notams'],
-                             current_date=datetime.now().strftime('%Y-%m-%d'),
-                             all_airports=sorted(notam_data['all_airports']),
-                             package_airports=notam_data['package_airports'],
-                             saved_mode=True,
-                             save_name=save_name)
-        
-    except Exception as e:
-        logger.error(f"저장된 NOTAM 보기 중 오류: {str(e)}")
-        flash(f'저장된 NOTAM을 불러오는 중 오류가 발생했습니다: {str(e)}', 'error')
-        return redirect(url_for('saved_notams'))
+@app.route('/')
+def index():
+    return render_template('index.html')
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -315,136 +289,25 @@ def analyze_route():
         data = request.get_json()
         route = data.get('route', '').strip()
         notam_data = data.get('notam_data', [])
-
+        
         if not route:
             return jsonify({'error': '항로를 입력해주세요.'}), 400
-
+        
         logger.info(f"분석할 항로: {route}")
         logger.info(f"NOTAM 데이터 개수: {len(notam_data)}")
-
+        
         # GEMINI를 사용한 루트 분석
         analysis_result = analyze_route_with_gemini(route, notam_data)
-
+        
         return jsonify({
             'route': route,
             'analysis': analysis_result,
             'timestamp': datetime.now().isoformat()
         })
-
+        
     except Exception as e:
         logger.error(f"루트 분석 중 오류: {str(e)}")
         return jsonify({'error': f'루트 분석 중 오류가 발생했습니다: {str(e)}'}), 500
-
-@app.route('/api/save_notams', methods=['POST'])
-def save_notams():
-    """NOTAM 결과를 로컬에 저장"""
-    try:
-        data = request.get_json()
-        notams = data.get('notams', [])
-        package_airports = data.get('package_airports', {})
-        all_airports = data.get('all_airports', [])
-        save_name = data.get('save_name', '').strip()
-        
-        if not save_name:
-            save_name = f"NOTAM_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        # 저장할 데이터 구조
-        save_data = {
-            'save_name': save_name,
-            'timestamp': datetime.now().isoformat(),
-            'notams': notams,
-            'package_airports': package_airports,
-            'all_airports': all_airports,
-            'total_count': len(notams)
-        }
-        
-        # 저장된 NOTAM 목록에 추가
-        saved_notams = load_saved_notams()
-        saved_notams[save_name] = save_data
-        
-        # 파일에 저장
-        save_saved_notams(saved_notams)
-        
-        logger.info(f"NOTAM 저장 완료: {save_name} ({len(notams)}개)")
-        
-        return jsonify({
-            'success': True,
-            'save_name': save_name,
-            'message': f'{len(notams)}개의 NOTAM이 "{save_name}"으로 저장되었습니다.'
-        })
-        
-    except Exception as e:
-        logger.error(f"NOTAM 저장 중 오류: {str(e)}")
-        return jsonify({'error': f'NOTAM 저장 중 오류가 발생했습니다: {str(e)}'}), 500
-
-@app.route('/api/load_saved_notams', methods=['GET'])
-def load_saved_notams_api():
-    """저장된 NOTAM 목록 조회"""
-    try:
-        saved_notams = load_saved_notams()
-        
-        # 메타데이터만 반환 (실제 NOTAM 데이터는 제외)
-        metadata = {}
-        for name, data in saved_notams.items():
-            metadata[name] = {
-                'save_name': data.get('save_name', name),
-                'timestamp': data.get('timestamp', ''),
-                'total_count': data.get('total_count', 0),
-                'package_airports': data.get('package_airports', {}),
-                'all_airports': data.get('all_airports', [])
-            }
-        
-        return jsonify({
-            'success': True,
-            'saved_notams': metadata
-        })
-        
-    except Exception as e:
-        logger.error(f"저장된 NOTAM 조회 중 오류: {str(e)}")
-        return jsonify({'error': f'저장된 NOTAM 조회 중 오류가 발생했습니다: {str(e)}'}), 500
-
-@app.route('/api/load_notam/<save_name>', methods=['GET'])
-def load_notam(save_name):
-    """특정 저장된 NOTAM 데이터 로드"""
-    try:
-        saved_notams = load_saved_notams()
-        
-        if save_name not in saved_notams:
-            return jsonify({'error': '저장된 NOTAM을 찾을 수 없습니다.'}), 404
-        
-        notam_data = saved_notams[save_name]
-        
-        return jsonify({
-            'success': True,
-            'notam_data': notam_data
-        })
-        
-    except Exception as e:
-        logger.error(f"NOTAM 로드 중 오류: {str(e)}")
-        return jsonify({'error': f'NOTAM 로드 중 오류가 발생했습니다: {str(e)}'}), 500
-
-@app.route('/api/delete_saved_notam/<save_name>', methods=['DELETE'])
-def delete_saved_notam(save_name):
-    """저장된 NOTAM 삭제"""
-    try:
-        saved_notams = load_saved_notams()
-        
-        if save_name not in saved_notams:
-            return jsonify({'error': '저장된 NOTAM을 찾을 수 없습니다.'}), 404
-        
-        del saved_notams[save_name]
-        save_saved_notams(saved_notams)
-        
-        logger.info(f"NOTAM 삭제 완료: {save_name}")
-        
-        return jsonify({
-            'success': True,
-            'message': f'"{save_name}" NOTAM이 삭제되었습니다.'
-        })
-        
-    except Exception as e:
-        logger.error(f"NOTAM 삭제 중 오류: {str(e)}")
-        return jsonify({'error': f'NOTAM 삭제 중 오류가 발생했습니다: {str(e)}'}), 500
 
 def analyze_route_with_gemini(route, notam_data):
     """GEMINI를 사용한 루트 분석 - NOTAM과 항로 연관성 중심"""
@@ -525,7 +388,7 @@ def format_notam_data_for_analysis(notam_data):
     """NOTAM 데이터를 분석용 문자열로 변환"""
     if not notam_data:
         return "현재 NOTAM 데이터가 없습니다."
-
+    
     formatted_text = "NOTAM 목록:\n\n"
     for notam in notam_data:
         formatted_text += f"NOTAM #{notam['index']}: {notam['notam_number']}\n"
@@ -533,35 +396,8 @@ def format_notam_data_for_analysis(notam_data):
         formatted_text += f"유효시간: {notam['effective_time']} - {notam['expiry_time']}\n"
         formatted_text += f"내용: {notam['text']}\n"
         formatted_text += "---\n"
-
+    
     return formatted_text
-
-def load_saved_notams():
-    """저장된 NOTAM 데이터 로드"""
-    try:
-        saved_file = os.path.join('data', 'saved_notams.json')
-        if os.path.exists(saved_file):
-            with open(saved_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {}
-    except Exception as e:
-        logger.error(f"저장된 NOTAM 로드 중 오류: {str(e)}")
-        return {}
-
-def save_saved_notams(saved_notams):
-    """NOTAM 데이터를 파일에 저장"""
-    try:
-        # data 디렉토리 생성
-        os.makedirs('data', exist_ok=True)
-        
-        saved_file = os.path.join('data', 'saved_notams.json')
-        with open(saved_file, 'w', encoding='utf-8') as f:
-            json.dump(saved_notams, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"NOTAM 데이터 저장 완료: {saved_file}")
-    except Exception as e:
-        logger.error(f"NOTAM 데이터 저장 중 오류: {str(e)}")
-        raise
 
 @app.route('/api/extract_airports', methods=['POST'])
 def extract_airports():
@@ -634,6 +470,242 @@ def extract_airports():
 def google_maps():
     """구글지도 페이지"""
     return render_template('google_maps.html')
+
+@app.route('/save_html', methods=['POST'])
+def save_html():
+    """현재 페이지를 그대로 HTML 파일로 저장"""
+    try:
+        # 현재 페이지의 HTML을 그대로 가져오기
+        from flask import request
+        
+        # 클라이언트에서 현재 페이지의 HTML을 전송받음
+        html_content = request.get_json().get('html_content', '')
+        
+        if not html_content:
+            return jsonify({'error': 'HTML 내용이 없습니다.'}), 400
+        
+        # HTML 파일명 생성
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'NOTAM_Results_{timestamp}.html'
+        
+        # 저장할 디렉토리 생성
+        save_dir = os.path.join(os.path.dirname(__file__), 'saved_results')
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # HTML 파일 경로
+        file_path = os.path.join(save_dir, filename)
+        
+        # 외부 리소스를 로컬로 변환
+        processed_html = process_html_for_offline(html_content)
+        
+        # 파일 저장
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(processed_html)
+        
+        logger.info(f"HTML 파일 저장 완료: {filename}")
+        
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'message': f'HTML 파일이 저장되었습니다: {filename}'
+        })
+        
+    except Exception as e:
+        logger.error(f"HTML 저장 중 오류: {str(e)}")
+        return jsonify({'error': f'HTML 저장 중 오류가 발생했습니다: {str(e)}'}), 500
+
+def process_html_for_offline(html_content):
+    """HTML을 오프라인에서 볼 수 있도록 처리"""
+    
+    # Bootstrap CSS를 로컬로 다운로드하거나 인라인으로 포함
+    bootstrap_css = """
+    <style>
+        /* Bootstrap 5.3.3 CSS (간소화된 버전) */
+        *,*::before,*::after{box-sizing:border-box}
+        body{margin:0;font-family:var(--bs-font-sans-serif);font-size:1rem;font-weight:400;line-height:1.5;color:#212529;background-color:#fff;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
+        .container{width:100%;padding-right:var(--bs-gutter-x,.75rem);padding-left:var(--bs-gutter-x,.75rem);margin-right:auto;margin-left:auto}
+        .row{--bs-gutter-x:1.5rem;--bs-gutter-y:0;display:flex;flex-wrap:wrap;margin-top:calc(-1 * var(--bs-gutter-y));margin-right:calc(-.5 * var(--bs-gutter-x));margin-left:calc(-.5 * var(--bs-gutter-x))}
+        .col{flex:1 0 0%}
+        .col-md-12{flex:0 0 auto;width:100%}
+        .btn{display:inline-block;font-weight:400;line-height:1.5;color:#212529;text-align:center;text-decoration:none;vertical-align:middle;cursor:pointer;-webkit-user-select:none;-moz-user-select:none;user-select:none;background-color:transparent;border:1px solid transparent;padding:.375rem .75rem;font-size:1rem;border-radius:.375rem;transition:color .15s ease-in-out,background-color .15s ease-in-out,border-color .15s ease-in-out,box-shadow .15s ease-in-out}
+        .btn-primary{color:#fff;background-color:#0d6efd;border-color:#0d6efd}
+        .btn-success{color:#fff;background-color:#198754;border-color:#198754}
+        .btn-info{color:#000;background-color:#0dcaf0;border-color:#0dcaf0}
+        .card{position:relative;display:flex;flex-direction:column;min-width:0;word-wrap:break-word;background-color:#fff;background-clip:border-box;border:1px solid rgba(0,0,0,.125);border-radius:.375rem}
+        .card-header{padding:.5rem 1rem;margin-bottom:0;background-color:rgba(0,0,0,.03);border-bottom:1px solid rgba(0,0,0,.125)}
+        .card-body{flex:1 1 auto;padding:1rem 1rem}
+        .table{width:100%;margin-bottom:1rem;color:#212529;vertical-align:top;border-color:#dee2e6}
+        .table>tbody{vertical-align:inherit}
+        .table>thead{vertical-align:bottom}
+        .table>:not(caption)>*>*{padding:.5rem .5rem;background-color:var(--bs-table-bg);border-bottom-width:1px}
+        .badge{display:inline-block;padding:.35em .65em;font-size:.75em;font-weight:700;line-height:1;color:#fff;text-align:center;white-space:nowrap;vertical-align:baseline;border-radius:.375rem}
+        .bg-info{background-color:#0dcaf0!important}
+        .bg-success{background-color:#198754!important}
+        .bg-warning{background-color:#ffc107!important}
+        .bg-danger{background-color:#dc3545!important}
+        .text-muted{color:#6c757d!important}
+        .d-flex{display:flex!important}
+        .justify-content-between{justify-content:space-between!important}
+        .align-items-center{align-items:center!important}
+        .mb-4{margin-bottom:1.5rem!important}
+        .gap-2{gap:.5rem!important}
+        .me-2{margin-right:.5rem!important}
+        .fas{font-family:"Font Awesome 6 Free";font-weight:900}
+        .fa-download:before{content:"\\f019"}
+        .fa-spinner:before{content:"\\f110"}
+        .fa-spin{animation:fa-spin 2s infinite linear}
+        @keyframes fa-spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+        .alert{padding:.75rem 1.25rem;margin-bottom:1rem;border:1px solid transparent;border-radius:.375rem}
+        .alert-success{color:#0f5132;background-color:#d1e7dd;border-color:#badbcc}
+        .alert-danger{color:#842029;background-color:#f8d7da;border-color:#f5c2c7}
+        .alert-dismissible{padding-right:4rem}
+        .btn-close{padding:.25em .25em;margin:.25rem -.25rem -.25rem auto;background:transparent;border:0;border-radius:.375rem;opacity:.5}
+        .btn-close:hover{color:#000;text-decoration:none;opacity:.75}
+        .btn-close:focus{outline:0;box-shadow:0 0 0 .25rem rgba(13,110,253,.25);opacity:1}
+        .btn-close:disabled{pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none;opacity:.25}
+        .btn-close::before{content:"\\00d7"}
+        .fade{transition:opacity .15s linear}
+        .show{opacity:1}
+        .table-responsive{overflow-x:auto;-webkit-overflow-scrolling:touch}
+        .border-primary{border-color:#0d6efd!important}
+        .bg-primary{background-color:#0d6efd!important}
+        .text-white{color:#fff!important}
+        .form-check{display:block;min-height:1.5rem;padding-left:1.5em}
+        .form-check-input{width:1em;height:1em;margin-top:.25em;vertical-align:top;background-color:#fff;background-repeat:no-repeat;background-position:center;background-size:contain;border:1px solid rgba(0,0,0,.25);-webkit-appearance:none;-moz-appearance:none;appearance:none}
+        .form-check-input:checked{background-color:#0d6efd;border-color:#0d6efd}
+        .form-check-input[type=checkbox]{border-radius:.25em}
+        .form-check-inline{display:inline-block;margin-right:1rem}
+        .flex-wrap{flex-wrap:wrap!important}
+        .translation-text{white-space:normal;font-size:.95rem;line-height:1.6;text-align:left;word-wrap:break-word;padding:10px;background-color:#f8f9fa;border-radius:.25rem;margin:.5rem 0}
+        .notam-text{font-family:'Courier New',monospace;background-color:#f8f9fa;padding:.5rem;border-radius:.25rem;margin:.5rem 0}
+        .airport-badges{margin:.5rem 0}
+        .airport-badges .badge{margin-right:.25rem;margin-bottom:.25rem}
+        .time-info{font-size:.875rem;color:#6c757d}
+        .notam-item{border-bottom:1px solid #dee2e6;padding:1rem 0}
+        .notam-item:last-child{border-bottom:none}
+        .small{font-size:.875em}
+        .text-center{text-align:center!important}
+        .fw-bold{font-weight:700!important}
+        .mb-0{margin-bottom:0!important}
+        .mb-1{margin-bottom:.25rem!important}
+        .mb-2{margin-bottom:.5rem!important}
+        .mb-3{margin-bottom:1rem!important}
+        .mt-3{margin-top:1rem!important}
+        .p-2{padding:.5rem!important}
+        .px-2{padding-right:.5rem!important;padding-left:.5rem!important}
+        .py-1{padding-top:.25rem!important;padding-bottom:.25rem!important}
+        .border{border:1px solid #dee2e6!important}
+        .border-top{border-top:1px solid #dee2e6!important}
+        .border-bottom{border-bottom:1px solid #dee2e6!important}
+        .rounded{border-radius:.375rem!important}
+        .shadow{box-shadow:0 .5rem 1rem rgba(0,0,0,.15)!important}
+        .w-100{width:100%!important}
+        .h-100{height:100%!important}
+        .position-relative{position:relative!important}
+        .position-absolute{position:absolute!important}
+        .position-fixed{position:fixed!important}
+        .top-0{top:0!important}
+        .end-0{right:0!important}
+        .start-0{left:0!important}
+        .translate-middle{transform:translate(-50%,-50%)!important}
+        .z-3{z-index:3!important}
+        .overflow-hidden{overflow:hidden!important}
+        .opacity-75{opacity:.75!important}
+        .opacity-50{opacity:.5!important}
+        .opacity-25{opacity:.25!important}
+        .opacity-0{opacity:0!important}
+        .visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+        .stretched-link::after{position:absolute;top:0;right:0;bottom:0;left:0;z-index:1;content:""}
+        .text-truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .align-baseline{vertical-align:baseline!important}
+        .align-top{vertical-align:top!important}
+        .align-middle{vertical-align:middle!important}
+        .align-bottom{vertical-align:bottom!important}
+        .align-text-bottom{vertical-align:text-bottom!important}
+        .align-text-top{vertical-align:text-top!important}
+        .float-start{float:left!important}
+        .float-end{float:right!important}
+        .float-none{float:none!important}
+        .user-select-all{-webkit-user-select:all!important;-moz-user-select:all!important;user-select:all!important}
+        .user-select-auto{-webkit-user-select:auto!important;-moz-user-select:auto!important;user-select:auto!important}
+        .user-select-none{-webkit-user-select:none!important;-moz-user-select:none!important;user-select:none!important}
+        .pe-none{pointer-events:none!important}
+        .pe-auto{pointer-events:auto!important}
+        .rounded-circle{border-radius:50%!important}
+        .rounded-pill{border-radius:50rem!important}
+        .rounded-0{border-radius:0!important}
+        .rounded-1{border-radius:.2rem!important}
+        .rounded-2{border-radius:.375rem!important}
+        .rounded-3{border-radius:.5rem!important}
+        .visible{visibility:visible!important}
+        .invisible{visibility:hidden!important}
+        @media (max-width:768px){
+            .container{padding:0 10px}
+            .table{font-size:.875rem}
+            .card-body{padding:.75rem}
+            .btn{padding:.25rem .5rem;font-size:.875rem}
+        }
+    </style>
+    """
+    
+    # Font Awesome 아이콘을 위한 CSS 추가
+    fontawesome_css = """
+    <style>
+        @font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("data:font/woff2;base64,") format("woff2")}
+        .fas{font-family:"Font Awesome 6 Free";font-weight:900}
+        .fa-download:before{content:"\\f019"}
+        .fa-spinner:before{content:"\\f110"}
+        .fa-map-marked-alt:before{content:"\\f5fa"}
+        .fa-spin{animation:fa-spin 2s infinite linear}
+        @keyframes fa-spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+    </style>
+    """
+    
+    # 외부 링크를 제거하고 로컬 스타일로 대체
+    processed_html = html_content
+    
+    # Bootstrap CDN 링크 제거
+    processed_html = processed_html.replace(
+        '<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">',
+        bootstrap_css
+    )
+    
+    # Font Awesome CDN 링크 제거
+    processed_html = processed_html.replace(
+        '<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">',
+        fontawesome_css
+    )
+    
+    # Bootstrap JS CDN 링크 제거 (기본 기능만 유지)
+    processed_html = processed_html.replace(
+        '<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>',
+        '<script>/* Bootstrap JS functionality removed for offline use */</script>'
+    )
+    
+    # HTML 저장 버튼 비활성화 (오프라인에서는 불필요)
+    processed_html = processed_html.replace(
+        'onclick="saveAsHTML()"',
+        'onclick="alert(\'오프라인 모드에서는 사용할 수 없습니다.\')"'
+    )
+    
+    return processed_html
+
+@app.route('/download_html/<filename>')
+def download_html(filename):
+    """저장된 HTML 파일 다운로드"""
+    try:
+        save_dir = os.path.join(os.path.dirname(__file__), 'saved_results')
+        file_path = os.path.join(save_dir, filename)
+        
+        if not os.path.exists(file_path):
+            return jsonify({'error': '파일을 찾을 수 없습니다.'}), 404
+        
+        return send_file(file_path, as_attachment=True, download_name=filename)
+        
+    except Exception as e:
+        logger.error(f"HTML 다운로드 중 오류: {str(e)}")
+        return jsonify({'error': f'HTML 다운로드 중 오류가 발생했습니다: {str(e)}'}), 500
+
 
 @app.route('/health')
 def health():

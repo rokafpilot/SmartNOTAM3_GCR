@@ -91,35 +91,19 @@
 <body>
     <div class="container">
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h1>
-                    NOTAM 목록
-                    {% if saved_mode %}
-                        <span class="badge bg-success ms-2">저장된 데이터</span>
-                    {% endif %}
-                </h1>
-                <p class="text-muted mb-0">총 {{ notams|length }}개의 NOTAM이 처리되었습니다.</p>
-            </div>
+            <h1>NOTAM 목록</h1>
             <div class="d-flex gap-2">
-                {% if not saved_mode %}
-                <button type="button" class="btn btn-success" onclick="saveNotams()">
-                    <i class="fas fa-save me-2"></i>
-                    저장
-                </button>
-                {% endif %}
                 <a href="{{ url_for('index') }}" class="btn btn-primary">
                     새 파일 업로드
                 </a>
-                <button type="button" class="btn btn-info" onclick="openGoogleMaps()">
+                <button type="button" class="btn btn-success" onclick="openGoogleMaps()">
                     <i class="fas fa-map-marked-alt me-2"></i>
                     구글지도
                 </button>
-                {% if saved_mode %}
-                <a href="/saved" class="btn btn-outline-secondary">
-                    <i class="fas fa-list me-2"></i>
-                    저장 목록
-                </a>
-                {% endif %}
+                <button type="button" class="btn btn-info" onclick="saveAsHTML()">
+                    <i class="fas fa-download me-2"></i>
+                    HTML 저장
+                </button>
             </div>
         </div>
         
@@ -244,14 +228,19 @@
         </div>
 
         <!-- 공항 필터링 결과 -->
-        <div class="alert alert-info" id="filterStatus">
-            전체 NOTAM: {{ notams|length }}개 (시간 필터링 비활성화 - 모든 NOTAM 표시)
-            {% if all_airports %}
-            <br><strong>포함된 공항:</strong> 
-            {% for airport in all_airports %}
-                <span class="badge bg-secondary me-1">{{ airport }}</span>
-            {% endfor %}
-            {% endif %}
+        <div class="alert alert-info" id="filterStatus" style="background-color: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; padding: 1rem; border-radius: 0.375rem; margin-bottom: 1rem;">
+            <div style="font-weight: 600; margin-bottom: 0.5rem;">
+                📊 필터링 상태
+            </div>
+            <div id="filterStatusContent">
+                전체 NOTAM: {{ notams|length }}개 (시간 필터링 비활성화 - 모든 NOTAM 표시)
+                {% if all_airports %}
+                <br><strong>포함된 공항:</strong> 
+                {% for airport in all_airports %}
+                    <span class="badge bg-secondary me-1">{{ airport }}</span>
+                {% endfor %}
+                {% endif %}
+            </div>
         </div>
 
         <!-- 루트 입력 카드 -->
@@ -704,6 +693,9 @@
             const uniqueAirports = [...new Set(airportCodes)].sort();
             console.log('추출된 공항 코드:', uniqueAirports);
             
+            // 필터링 상태 초기화
+            initializeFilterStatus();
+            
             // 공항 필터 초기화 (패키지별 공항 필터가 없는 경우에만)
             const packageAirports = {{ package_airports|tojson|safe if package_airports else 'null' }};
             if (!packageAirports) {
@@ -880,11 +872,13 @@
 
             // 상태 업데이트
             const filterStatus = document.getElementById('filterStatus');
+            const filterStatusContent = document.getElementById('filterStatusContent');
+            
             if (selectedAirports.length === 0) {
-                filterStatus.innerHTML = `전체 NOTAM: ${totalNotams}개 (공항 필터 없음 - 모든 NOTAM 표시)`;
+                filterStatusContent.innerHTML = `전체 NOTAM: ${totalNotams}개 (공항 필터 없음 - 모든 NOTAM 표시)`;
             } else {
-                filterStatus.innerHTML = `
-                    필터링 결과: ${visibleCount}개 NOTAM이 선택된 공항에 포함됨 (전체: ${totalNotams}개)<br>
+                filterStatusContent.innerHTML = `
+                    필터링 결과: <strong style="color: #dc3545;">${visibleCount}개</strong> NOTAM이 선택된 공항에 포함됨 (전체: ${totalNotams}개)<br>
                     <strong>선택된 공항:</strong> ${selectedAirports.map(airport => 
                         `<span class="badge bg-primary me-1">${airport}</span>`
                     ).join('')}
@@ -973,133 +967,6 @@
                 throw error;
             }
         }
-
-        // 저장 기능
-        async function saveNotams() {
-            const saveName = prompt('저장할 이름을 입력하세요:', `NOTAM_${new Date().toLocaleDateString('ko-KR').replace(/\./g, '')}`);
-            
-            if (!saveName) return;
-            
-            try {
-                // 현재 NOTAM 데이터 수집
-                const notamData = collectCurrentNotamData();
-                
-                const response = await fetch('/api/save_notams', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        notams: notamData,
-                        package_airports: {{ package_airports | tojson }},
-                        all_airports: {{ all_airports | tojson }},
-                        save_name: saveName
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    alert(data.message);
-                } else {
-                    alert('저장 중 오류가 발생했습니다: ' + data.error);
-                }
-            } catch (error) {
-                console.error('Save error:', error);
-                alert('저장 중 오류가 발생했습니다.');
-            }
-        }
-
-        // 오프라인 필터링 기능 (저장된 NOTAM에서도 작동)
-        function applyOfflineFilters() {
-            const airportFilter = document.getElementById('airportFilter');
-            const timeFilterSwitch = document.getElementById('timeFilterSwitch');
-            
-            let visibleCount = 0;
-            const notamItems = document.querySelectorAll('.notam-item');
-            
-            notamItems.forEach((item, index) => {
-                let isVisible = true;
-                
-                // 공항 필터 적용
-                if (airportFilter && airportFilter.value) {
-                    const selectedAirport = airportFilter.value;
-                    const airportBadges = item.querySelectorAll('.badge.bg-info');
-                    const airports = Array.from(airportBadges).map(badge => badge.textContent.trim());
-                    
-                    if (!airports.includes(selectedAirport)) {
-                        isVisible = false;
-                    }
-                }
-                
-                // 시간 필터 적용 (저장된 모드에서도 작동)
-                if (timeFilterSwitch && timeFilterSwitch.checked) {
-                    const startDate = document.getElementById('startDate').value;
-                    const endDate = document.getElementById('endDate').value;
-                    const startTime = document.getElementById('startTime').value;
-                    const endTime = document.getElementById('endTime').value;
-                    
-                    if (startDate && endDate && startTime && endTime) {
-                        const filterStart = new Date(startDate + 'T' + startTime);
-                        const filterEnd = new Date(endDate + 'T' + endTime);
-                        
-                        const effectiveTime = item.dataset.effectiveTime;
-                        const expiryTime = item.dataset.expiryTime;
-                        
-                        if (effectiveTime && expiryTime && effectiveTime !== 'UFN' && expiryTime !== 'UFN') {
-                            try {
-                                let notamStart, notamEnd;
-                                
-                                if (effectiveTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/)) {
-                                    notamStart = new Date(effectiveTime);
-                                } else if (effectiveTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
-                                    notamStart = new Date(effectiveTime + 'Z');
-                                } else if (effectiveTime.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)) {
-                                    notamStart = new Date(effectiveTime.replace(' ', 'T') + ':00Z');
-                                } else {
-                                    notamStart = new Date(effectiveTime);
-                                }
-                                
-                                if (expiryTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/)) {
-                                    notamEnd = new Date(expiryTime);
-                                } else if (expiryTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
-                                    notamEnd = new Date(expiryTime + 'Z');
-                                } else if (expiryTime.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)) {
-                                    notamEnd = new Date(expiryTime.replace(' ', 'T') + ':00Z');
-                                } else {
-                                    notamEnd = new Date(expiryTime);
-                                }
-                                
-                                // 시간 겹침 확인
-                                if (notamEnd < filterStart || notamStart > filterEnd) {
-                                    isVisible = false;
-                                }
-                            } catch (error) {
-                                console.warn(`NOTAM ${index + 1} 시간 파싱 오류:`, error);
-                            }
-                        }
-                    }
-                }
-                
-                // 표시/숨김 적용
-                item.style.display = isVisible ? '' : 'none';
-                if (isVisible) visibleCount++;
-            });
-            
-            // 결과 표시
-            const resultText = document.getElementById('filterResult');
-            if (resultText) {
-                resultText.textContent = `${visibleCount}개의 NOTAM이 표시됩니다.`;
-                resultText.style.display = 'block';
-            }
-        }
-
-        // 저장된 모드에서는 오프라인 필터 사용
-        {% if saved_mode %}
-        function applyTimeFilter() {
-            applyOfflineFilters();
-        }
-        {% endif %}
 
         function collectCurrentNotamData() {
             const notamItems = document.querySelectorAll('.notam-item');
@@ -1439,6 +1306,96 @@
         function clearRoute() {
             document.getElementById('routeInput').value = '';
             document.getElementById('routeAnalysisResult').style.display = 'none';
+        }
+
+        // HTML 저장 기능
+        function saveAsHTML() {
+            // 현재 페이지의 전체 HTML을 가져오기
+            const htmlContent = document.documentElement.outerHTML;
+            
+            // 로딩 상태 표시
+            const saveBtn = event.target;
+            const originalText = saveBtn.innerHTML;
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>저장 중...';
+            saveBtn.disabled = true;
+            
+            // 서버에 HTML 저장 요청
+            fetch('/save_html', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    html_content: htmlContent
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // 성공 메시지 표시
+                    showAlert('success', `HTML 파일이 저장되었습니다: ${data.filename}`);
+                    
+                    // 다운로드 링크 제공
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = `/download_html/${data.filename}`;
+                    downloadLink.download = data.filename;
+                    downloadLink.click();
+                } else {
+                    showAlert('danger', `저장 실패: ${data.error}`);
+                }
+            })
+            .catch(error => {
+                console.error('HTML 저장 오류:', error);
+                showAlert('danger', 'HTML 저장 중 오류가 발생했습니다.');
+            })
+            .finally(() => {
+                // 버튼 상태 복원
+                saveBtn.innerHTML = originalText;
+                saveBtn.disabled = false;
+            });
+        }
+
+        function showAlert(type, message) {
+            // 기존 알림 제거
+            const existingAlert = document.querySelector('.alert');
+            if (existingAlert) {
+                existingAlert.remove();
+            }
+            
+            // 새 알림 생성
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+            alertDiv.style.position = 'fixed';
+            alertDiv.style.top = '20px';
+            alertDiv.style.right = '20px';
+            alertDiv.style.zIndex = '9999';
+            alertDiv.style.minWidth = '300px';
+            
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            document.body.appendChild(alertDiv);
+            
+            // 5초 후 자동 제거
+            setTimeout(() => {
+                if (alertDiv.parentNode) {
+                    alertDiv.remove();
+                }
+            }, 5000);
+        }
+
+        function initializeFilterStatus() {
+            // 현재 표시된 NOTAM 개수 계산
+            const visibleNotams = document.querySelectorAll('.notam-item:not([style*="display: none"])');
+            const totalNotams = document.querySelectorAll('.notam-item').length;
+            
+            // 필터링 상태 업데이트
+            const filterStatusContent = document.getElementById('filterStatusContent');
+            if (filterStatusContent) {
+                filterStatusContent.innerHTML = `전체 NOTAM: <strong style="color: #198754;">${totalNotams}개</strong> (현재 ${visibleNotams.length}개 표시 중)`;
+            }
         }
     </script>
 </body>

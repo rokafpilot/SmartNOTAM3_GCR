@@ -388,8 +388,11 @@ Translated text:"""
 번역문:"""
         
         # Gemini API 호출
-        response = model.generate_content(prompt)
-        translated_text = response.text.strip()
+        if model and GEMINI_AVAILABLE:
+            response = model.generate_content(prompt)
+            translated_text = response.text.strip()
+        else:
+            translated_text = "GEMINI API를 사용할 수 없습니다."
         
         # "CREATED:" 이후의 텍스트 제거
         translated_text = re.sub(r'\s*CREATED:.*$', '', translated_text)
@@ -530,9 +533,17 @@ class NOTAMFilter:
         return airports_data
     
     def get_timezone(self, airport_code):
-        """공항 코드에 따른 타임존 정보 반환"""
+        """공항 코드에 따른 타임존 정보 반환 (DST 고려)"""
         if airport_code in self.airports_data:
-            return self.airports_data[airport_code].get('utc_offset', '+00:00')
+            timezone_info = self.airports_data[airport_code].get('utc_offset', '+00:00')
+            
+            # 시애틀(KSEA) 특별 처리 - DST 적용
+            if airport_code == 'KSEA':
+                from src.icao import is_dst_active
+                dst_active = is_dst_active()
+                return '-07:00' if dst_active else '-08:00'  # PDT/PST
+            
+            return timezone_info
         
         # 기본 타임존 설정 (ICAO 코드 첫 글자 기준)
         if airport_code.startswith('RK'):  # 한국
@@ -543,6 +554,21 @@ class NOTAMFilter:
             return '+08:00'
         elif airport_code.startswith('VV'):  # 베트남
             return '+07:00'
+        elif airport_code.startswith('K'):  # 미국 공항들 - DST 적용
+            from src.icao import is_dst_active
+            dst_active = is_dst_active()
+            if airport_code.startswith('KS'):  # 서부 (시애틀, 샌프란시스코)
+                return '-07:00' if dst_active else '-08:00'  # PDT/PST
+            elif airport_code.startswith('KL'):  # 서부 (로스앤젤레스)
+                return '-07:00' if dst_active else '-08:00'  # PDT/PST
+            elif airport_code.startswith('KD'):  # 중부 (덴버)
+                return '-06:00' if dst_active else '-07:00'  # MDT/MST
+            elif airport_code.startswith('KM'):  # 중부 (시카고)
+                return '-05:00' if dst_active else '-06:00'  # CDT/CST
+            elif airport_code.startswith('KE'):  # 동부 (뉴욕)
+                return '-04:00' if dst_active else '-05:00'  # EDT/EST
+            else:
+                return '-05:00' if dst_active else '-06:00'  # 기본 중부 시간대
         else:
             return '+00:00'  # UTC
     

@@ -1,45 +1,70 @@
-import csv
 import os
-from datetime import datetime, timezone, timedelta
+import csv
+from datetime import datetime, timedelta
+import requests
+import logging
 
-# API 기반 시간대 시스템 import
-try:
-    from timezone_api import get_utc_offset_api
-    API_AVAILABLE = True
-except ImportError:
-    try:
-        from .timezone_api import get_utc_offset_api
-        API_AVAILABLE = True
-    except ImportError:
-        API_AVAILABLE = False
+# 로깅 설정
+logger = logging.getLogger(__name__)
 
-# CSV 파일에서 공항 시간대 정보 로드
+# 전역 변수
 _airport_timezones = {}
 _csv_loaded = False
+API_AVAILABLE = True
 
 def _load_airport_timezones():
-    """CSV 파일에서 공항 시간대 정보를 로드"""
+    """CSV 파일에서 공항 시간대 정보 로드"""
     global _airport_timezones, _csv_loaded
     
     if _csv_loaded:
         return
-    
-    # 실제 CSV 파일 경로 설정
-    csv_path = os.path.join(os.path.dirname(__file__), 'airports_timezones.csv')
-    
+        
     try:
-        with open(csv_path, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                icao_code = row.get('ident', '').upper()
-                timezone = row.get('time_zone', '')
-                if icao_code and timezone:
-                    _airport_timezones[icao_code] = timezone
-        _csv_loaded = True
-        print(f"공항 시간대 정보 로드 완료: {len(_airport_timezones)}개 공항")
+        csv_path = os.path.join(os.path.dirname(__file__), 'airports_timezones.csv')
+        if os.path.exists(csv_path):
+            with open(csv_path, 'r', encoding='utf-8') as file:
+                reader = csv.DictReader(file)
+                for row in reader:
+                    icao_code = row.get('ident', '').strip()
+                    timezone = row.get('time_zone', 'UTC+0').strip()
+                    if icao_code and timezone:
+                        _airport_timezones[icao_code] = timezone
+            print(f"공항 시간대 CSV 로드 완료: {len(_airport_timezones)}개")
+        else:
+            print(f"공항 데이터 파일을 찾을 수 없습니다: {csv_path}")
+            
     except Exception as e:
         print(f"공항 시간대 CSV 로드 오류: {e}")
         _csv_loaded = True  # 오류가 나도 다시 시도하지 않도록
+
+def is_dst_active():
+    """
+    미국 DST 규칙에 따른 일광절약시간 활성 여부 판단
+    2024년 기준: 3월 둘째 일요일 02:00 ~ 11월 첫째 일요일 02:00
+    """
+    current_date = datetime.now()
+    current_year = current_date.year
+    
+    # 3월 둘째 일요일 계산
+    march_first = datetime(current_year, 3, 1)
+    march_first_weekday = march_first.weekday()  # 0=월요일, 6=일요일
+    days_to_first_sunday = (6 - march_first_weekday) % 7
+    first_sunday_march = march_first + timedelta(days=days_to_first_sunday)
+    second_sunday_march = first_sunday_march + timedelta(days=7)
+    
+    # 11월 첫째 일요일 계산
+    november_first = datetime(current_year, 11, 1)
+    november_first_weekday = november_first.weekday()
+    days_to_first_sunday_nov = (6 - november_first_weekday) % 7
+    first_sunday_november = november_first + timedelta(days=days_to_first_sunday_nov)
+    
+    # DST 시작: 3월 둘째 일요일 02:00
+    dst_start = second_sunday_march.replace(hour=2, minute=0, second=0, microsecond=0)
+    
+    # DST 종료: 11월 첫째 일요일 02:00
+    dst_end = first_sunday_november.replace(hour=2, minute=0, second=0, microsecond=0)
+    
+    return dst_start <= current_date < dst_end
 
 def get_utc_offset(icao_code, use_api=True):
     """
@@ -137,18 +162,7 @@ def get_timezone_by_fir_pattern(icao_code):
     # 첫 2글자로 FIR 지역 식별
     fir_prefix = icao_code[:2]
     
-    # 현재 날짜 정보
-    now = datetime.now()
-    current_month = now.month
-    current_day = now.day
-    
-    # 일광절약시간 적용 여부 판단 함수
-    def is_dst_active():
-        # 3월 둘째 일요일 ~ 11월 첫째 일요일 (미국/캐나다)
-        # 3월 마지막 일요일 ~ 10월 마지막 일요일 (유럽)
-        # 간단히 3월~10월을 DST 기간으로 설정 (근사치)
-        return 3 <= current_month <= 10
-    
+    # DST 활성 여부 확인
     dst_active = is_dst_active()
     
     # 동아시아 FIR 매핑 (R으로 시작) - DST 미적용 지역
@@ -204,14 +218,14 @@ def get_timezone_by_fir_pattern(icao_code):
         return "UTC-7" if dst_active else "UTC-8"  # PDT/PST
     elif fir_prefix == 'KD':    # 중부 (덴버)
         return "UTC-6" if dst_active else "UTC-7"  # MDT/MST
-    elif fir_prefix == 'KC':    # 중부 (시카고)
+    elif fir_prefix == 'KM':    # 중부 (시카고)
         return "UTC-5" if dst_active else "UTC-6"  # CDT/CST
-    elif fir_prefix == 'KN' or fir_prefix == 'KJ' or fir_prefix == 'KE':  # 동부
+    elif fir_prefix == 'KE':    # 동부 (뉴욕)
         return "UTC-4" if dst_active else "UTC-5"  # EDT/EST
-    elif fir_prefix == 'KM':    # 알래스카
+    elif fir_prefix == 'KH':    # 하와이
+        return "UTC-10"  # HST (DST 없음)
+    elif fir_prefix == 'PA':    # 알래스카
         return "UTC-8" if dst_active else "UTC-9"  # AKDT/AKST
-    elif fir_prefix == 'PH':    # 하와이 (DST 미적용)
-        return "UTC-10" # HST
     
     # 캐나다 FIR 매핑 (C로 시작) - DST 적용
     elif fir_prefix == 'CY':    # 캐나다 동부
@@ -219,42 +233,86 @@ def get_timezone_by_fir_pattern(icao_code):
     elif fir_prefix == 'CZ':    # 캐나다 서부
         return "UTC-7" if dst_active else "UTC-8"  # PDT/PST
     
-    # 유럽 FIR 매핑 (E, L로 시작) - DST 적용
+    # 유럽 FIR 매핑 (L로 시작) - DST 적용
+    elif fir_prefix == 'LF':    # 프랑스
+        return "UTC+2" if dst_active else "UTC+1"  # CEST/CET
     elif fir_prefix == 'EG':    # 영국
         return "UTC+1" if dst_active else "UTC+0"  # BST/GMT
     elif fir_prefix == 'ED':    # 독일
         return "UTC+2" if dst_active else "UTC+1"  # CEST/CET
-    elif fir_prefix == 'EF':    # 프랑스
-        return "UTC+2" if dst_active else "UTC+1"  # CEST/CET
-    elif fir_prefix == 'LF':    # 프랑스
-        return "UTC+2" if dst_active else "UTC+1"  # CEST/CET
-    elif fir_prefix == 'LE':    # 스페인
-        return "UTC+2" if dst_active else "UTC+1"  # CEST/CET
-    elif fir_prefix == 'LI':    # 이탈리아
-        return "UTC+2" if dst_active else "UTC+1"  # CEST/CET
     
-    # 호주/오세아니아 FIR 매핑 (Y로 시작) - 남반구 DST (10월~3월)
-    elif fir_prefix == 'YS':    # 호주 동부
-        # 남반구는 10-3월이 여름 (DST 적용)
-        aus_dst = current_month >= 10 or current_month <= 3
-        return "UTC+11" if aus_dst else "UTC+10"  # AEDT/AEST
-    elif fir_prefix == 'YP':    # 호주 서부 (DST 미적용)
-        return "UTC+8"  # AWST
-    elif fir_prefix == 'YC':    # 호주 중부
-        aus_dst = current_month >= 10 or current_month <= 3
-        return "UTC+10.5" if aus_dst else "UTC+9.5"  # ACDT/ACST
+    # 오스트레일리아 FIR 매핑 (Y로 시작) - DST 적용
+    elif fir_prefix == 'YB':    # 브리즈번 (DST 없음)
+        return "UTC+10"
+    elif fir_prefix == 'YS':    # 시드니
+        return "UTC+11" if dst_active else "UTC+10"  # AEDT/AEST
+    elif fir_prefix == 'YM':    # 멜버른
+        return "UTC+11" if dst_active else "UTC+10"  # AEDT/AEST
     
-    # 기타 주요 FIR
-    elif fir_prefix == 'OM':    # 중동 (UAE, 카타르 등)
-        return "UTC+4"
-    elif fir_prefix == 'OE':    # 사우디아라비아
-        return "UTC+3"
-    elif fir_prefix == 'LT':    # 터키
-        return "UTC+3"
-    elif fir_prefix == 'UR':    # 러시아 서부
-        return "UTC+3"
-    elif fir_prefix == 'UH':    # 러시아 동부
-        return "UTC+8"
-    
-    # 패턴 매칭 실패시 기본값
+    # 기본값
     return "UTC+0"
+
+def get_utc_offset_api(icao_code):
+    """
+    API를 사용하여 ICAO 코드의 UTC 오프셋을 조회합니다.
+    
+    Args:
+        icao_code (str): ICAO 공항 코드
+        
+    Returns:
+        str: UTC 오프셋 (예: UTC-8, UTC+9)
+    """
+    try:
+        # TimeAPI.io를 사용한 시간대 조회
+        url = f'https://timeapi.io/api/TimeZone/coordinate'
+        
+        # ICAO 코드로 좌표 조회 (간단한 매핑)
+        coordinates = get_coordinates_by_icao(icao_code)
+        if not coordinates:
+            return None
+            
+        params = {
+            'latitude': coordinates['lat'],
+            'longitude': coordinates['lon']
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            
+            # UTC 오프셋 계산
+            utc_offset_obj = data.get('currentUtcOffset', {})
+            utc_offset_seconds = utc_offset_obj.get('seconds', 0)
+            
+            # 시간대 형식 변환
+            hours = utc_offset_seconds // 3600
+            minutes = abs(utc_offset_seconds % 3600) // 60
+            utc_offset_str = f"UTC{hours:+d}" if minutes == 0 else f"UTC{hours:+d}:{minutes:02d}"
+            
+            return utc_offset_str
+            
+    except Exception as e:
+        logger.error(f"API 시간대 조회 오류: {e}")
+        
+    return None
+
+def get_coordinates_by_icao(icao_code):
+    """
+    ICAO 코드로 좌표를 조회합니다.
+    
+    Args:
+        icao_code (str): ICAO 공항 코드
+        
+    Returns:
+        dict: {'lat': float, 'lon': float} 또는 None
+    """
+    # 주요 공항의 좌표 매핑 (예시)
+    airport_coordinates = {
+        'KSEA': {'lat': 47.4475673, 'lon': -122.3080159},  # 시애틀
+        'RKSI': {'lat': 37.4601919, 'lon': 126.4406952},   # 인천
+        'RJTT': {'lat': 35.5493939, 'lon': 139.7798386},   # 하네다
+        'VVDN': {'lat': 16.043917, 'lon': 108.19937},      # 다낭
+        'VVCR': {'lat': 10.818139, 'lon': 106.652002},     # 호치민
+    }
+    
+    return airport_coordinates.get(icao_code.upper())

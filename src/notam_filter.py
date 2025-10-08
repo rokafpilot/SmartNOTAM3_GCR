@@ -388,11 +388,8 @@ Translated text:"""
 번역문:"""
         
         # Gemini API 호출
-        if model and GEMINI_AVAILABLE:
-            response = model.generate_content(prompt)
-            translated_text = response.text.strip()
-        else:
-            translated_text = "GEMINI API를 사용할 수 없습니다."
+        response = model.generate_content(prompt)
+        translated_text = response.text.strip()
         
         # "CREATED:" 이후의 텍스트 제거
         translated_text = re.sub(r'\s*CREATED:.*$', '', translated_text)
@@ -533,17 +530,9 @@ class NOTAMFilter:
         return airports_data
     
     def get_timezone(self, airport_code):
-        """공항 코드에 따른 타임존 정보 반환 (DST 고려)"""
+        """공항 코드에 따른 타임존 정보 반환"""
         if airport_code in self.airports_data:
-            timezone_info = self.airports_data[airport_code].get('utc_offset', '+00:00')
-            
-            # 시애틀(KSEA) 특별 처리 - DST 적용
-            if airport_code == 'KSEA':
-                from src.icao import is_dst_active
-                dst_active = is_dst_active()
-                return '-07:00' if dst_active else '-08:00'  # PDT/PST
-            
-            return timezone_info
+            return self.airports_data[airport_code].get('utc_offset', '+00:00')
         
         # 기본 타임존 설정 (ICAO 코드 첫 글자 기준)
         if airport_code.startswith('RK'):  # 한국
@@ -554,21 +543,20 @@ class NOTAMFilter:
             return '+08:00'
         elif airport_code.startswith('VV'):  # 베트남
             return '+07:00'
-        elif airport_code.startswith('K'):  # 미국 공항들 - DST 적용
-            from src.icao import is_dst_active
-            dst_active = is_dst_active()
+        elif airport_code.startswith('K'):  # 미국 공항들
+            # 미국 시간대별 기본 설정 (DST 고려하지 않고 표준 시간 사용)
             if airport_code.startswith('KS'):  # 서부 (시애틀, 샌프란시스코)
-                return '-07:00' if dst_active else '-08:00'  # PDT/PST
+                return '-08:00'  # PST
             elif airport_code.startswith('KL'):  # 서부 (로스앤젤레스)
-                return '-07:00' if dst_active else '-08:00'  # PDT/PST
+                return '-08:00'  # PST
             elif airport_code.startswith('KD'):  # 중부 (덴버)
-                return '-06:00' if dst_active else '-07:00'  # MDT/MST
+                return '-07:00'  # MST
             elif airport_code.startswith('KM'):  # 중부 (시카고)
-                return '-05:00' if dst_active else '-06:00'  # CDT/CST
+                return '-06:00'  # CST
             elif airport_code.startswith('KE'):  # 동부 (뉴욕)
-                return '-04:00' if dst_active else '-05:00'  # EDT/EST
+                return '-05:00'  # EST
             else:
-                return '-05:00' if dst_active else '-06:00'  # 기본 중부 시간대
+                return '-06:00'  # 기본 중부 시간대
         else:
             return '+00:00'  # UTC
     
@@ -765,30 +753,12 @@ class NOTAMFilter:
                 break
         
         
-        # E) 필드 추출 - 더 포괄적인 패턴 사용
-        e_field_patterns = [
-            # 패턴 1: E) 이후 다음 NOTAM 시작 전까지 (가장 포괄적)
-            r'E\)\s*(.+?)(?=\n\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4})',
-            # 패턴 2: E) 이후 구분선 전까지
-            r'E\)\s*(.+?)(?=\n\s*={20,}\s*$)',
-            # 패턴 3: E) 이후 문서 끝까지 (마지막 NOTAM인 경우)
-            r'E\)\s*(.+?)$',
-            # 패턴 4: E) 이후 다른 섹션(F), G) 등) 전까지
-            r'E\)\s*(.+?)(?=\n\s*[A-Z]\)\s*[A-Z])',
-        ]
-        
-        e_field = None
-        for pattern in e_field_patterns:
-            e_field_match = re.search(pattern, cleaned_text, re.DOTALL)
-            if e_field_match:
-                e_field = e_field_match.group(1).strip()
-                break
-        
-        if e_field:
+        # E) 필드 추출 - 더 유연한 종료 조건 사용
+        e_field_match = re.search(r'E\)\s*(.+?)(?=(?:\n|^)\s*={20,}\s*$|(?:\n|^)\s*\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}\s*-\s*(?:\d{2}[A-Z]{3}\d{2}\s+\d{2}:\d{2}|UFN)\s+[A-Z]{4}|(?:\n|^)\s*=+\s*$|(?:\n|^)={20,}(?:\n|$)|$)', cleaned_text, re.DOTALL)
+        if e_field_match:
+            e_field = e_field_match.group(1).strip()
             # NO CURRENT NOTAMS FOUND 이후의 내용 제거
             e_field = re.sub(r'\*{8}\s*NO CURRENT NOTAMS FOUND\s*\*{8}.*$', '', e_field, flags=re.DOTALL | re.IGNORECASE).strip()
-            # CREATED: 이후의 메타데이터 제거
-            e_field = re.sub(r'CREATED:.*$', '', e_field, flags=re.DOTALL).strip()
             # E) 필드에 색상 스타일 적용
             e_field = apply_color_styles(e_field)
             parsed_notam['e_field'] = e_field

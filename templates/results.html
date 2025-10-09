@@ -327,7 +327,12 @@
                                 {% endif %}
                                 <tr>
                                     <th>유효시간</th>
-                                    <td>{{ notam.local_time_display|default(notam.effective_time|default('N/A') ~ ' ~ ' ~ notam.expiry_time|default('N/A')) }}</td>
+                                    <td>
+                                        {{ notam.local_time_display|default(notam.effective_time|default('N/A') ~ ' ~ ' ~ notam.expiry_time|default('N/A')) }}
+                                        {% if not notam.local_time_display %}
+                                        <br><small style="color: red;">DEBUG: local_time_display 없음 | effective_time: {{ notam.effective_time|default('None') }} | expiry_time: {{ notam.expiry_time|default('None') }}</small>
+                                        {% endif %}
+                                    </td>
                                 </tr>
                                 <tr>
                                     <th>원문</th>

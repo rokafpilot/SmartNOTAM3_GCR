@@ -110,6 +110,9 @@ dmypy.json
 *.swo
 *~
 
+# Windows AppData
+AppData/
+
 # macOS
 .DS_Store
 .DS_Store?

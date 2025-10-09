@@ -202,14 +202,14 @@ def upload_file():
             
             # NOTAM 시간을 로컬 시간으로 변환 시간 측정
             time_conversion_start = datetime.now()
-            for notam in notams:
+            for i, notam in enumerate(notams):
                 airport_code = notam.get('airport_code', 'RKSI')  # 기본값: 인천공항
                 
                 effective_time = notam.get('effective_time', '')
                 expiry_time = notam.get('expiry_time', '')
                 
                 # 로컬 시간으로 변환된 시간 문자열 생성
-                if effective_time and expiry_time:
+                if effective_time:
                     local_time_str = notam_filter.format_notam_time_with_local(
                         effective_time, expiry_time, airport_code, notam
                     )

@@ -685,6 +685,11 @@ class NOTAMFilter:
     
     def _calculate_timezone(self, airport_code):
         """실제 시간대 계산 (캐싱 없이)"""
+        
+        # FIR 코드 처리 (공항 코드가 아닌 경우)
+        if self._is_fir_code(airport_code):
+            return self._get_fir_timezone(airport_code)
+        
         # 1단계: CSV 데이터에서 정확한 시간대 조회
         if airport_code in self.airports_data:
             csv_timezone = self.airports_data[airport_code].get('utc_offset', '+00:00')
@@ -702,7 +707,8 @@ class NOTAMFilter:
                 elif advanced_timezone.startswith('UTC-'):
                     return '-' + advanced_timezone[4:] + ':00'
         except Exception as e:
-            print(f"Advanced timezone system failed: {e}")
+            # 인코딩 오류 방지를 위해 영어 메시지 사용
+            print(f"Advanced timezone system failed: {str(e)}")
         
         # 3단계: 기본 타임존 설정 (ICAO 코드 첫 글자 기준)
         if airport_code.startswith('RK'):  # 한국
@@ -729,6 +735,374 @@ class NOTAMFilter:
                 return '-06:00'  # 기본 중부 시간대
         else:
             return '+00:00'  # UTC
+    
+    def _is_fir_code(self, code):
+        """FIR 코드인지 확인"""
+        # FIR 코드 패턴: 국가 코드를 두 번 반복하는 형태
+        # 예: RKRR (한국), RJJJ (일본), KZSE (미국), CZVR (캐나다)
+        if len(code) != 4:
+            return False
+        
+        # 일반적인 FIR 코드 패턴들 (Wikipedia FIR 목록 기반)
+        fir_patterns = [
+            # 한국
+            'RKRR',  # 인천 (Incheon)
+            
+            # 일본
+            'RJJJ',  # 후쿠오카 (Fukuoka)
+            'RJBE',  # 고베 (Kobe)
+            'RJCG',  # 삿포로 (Sapporo)
+            'RJFF',  # 후쿠오카 (Fukuoka)
+            'RJTG',  # 도쿄 (Tokyo)
+            
+            # 미국
+            'KZAB',  # 앨버커키 (Albuquerque)
+            'KZAK',  # 오클랜드 해양 (Oakland Oceanic)
+            'KZAU',  # 시카고 (Chicago)
+            'KZBW',  # 보스턴 (Boston)
+            'KZDC',  # 워싱턴 (Washington)
+            'KZDV',  # 덴버 (Denver)
+            'KZFW',  # 포트워스 (Fort Worth)
+            'KZHU',  # 휴스턴 (Houston)
+            'KZID',  # 인디애나폴리스 (Indianapolis)
+            'KZJX',  # 잭슨빌 (Jacksonville)
+            'KZKC',  # 캔자스시티 (Kansas City)
+            'KZLA',  # 로스앤젤레스 (Los Angeles)
+            'KZLC',  # 솔트레이크 (Salt Lake)
+            'KZMA',  # 마이애미 (Miami)
+            'KZME',  # 멤피스 (Memphis)
+            'KZMP',  # 미니애폴리스 (Minneapolis)
+            'KZNY',  # 뉴욕 (New York)
+            'KZOA',  # 오클랜드 (Oakland)
+            'KZOB',  # 클리블랜드 (Cleveland)
+            'KZSE',  # 시애틀 (Seattle)
+            'KZTL',  # 애틀랜타 (Atlanta)
+            'KZWY',  # 뉴욕 해양 (New York Oceanic)
+            'PAZA',  # 앵커리지 대륙 (Anchorage Continental)
+            'PAZN',  # 앵커리지 해양 (Anchorage Oceanic)
+            'PHZH',  # 호놀룰루 (Honolulu)
+            
+            # 캐나다
+            'CZEG',  # 에드먼턴 (Edmonton)
+            'CZQM',  # 몽크톤 (Moncton)
+            'CZQX',  # 간더 (Gander)
+            'CZUL',  # 몬트리올 (Montreal)
+            'CZVR',  # 밴쿠버 (Vancouver)
+            'CZWG',  # 위니펙 (Winnipeg)
+            'CZYZ',  # 토론토 (Toronto)
+            
+            # 유럽
+            'EGTT',  # 런던 (London)
+            'EGGX',  # 센윅 해양 (Shanwick Oceanic)
+            'EGPX',  # 스코틀랜드 (Scottish)
+            'EGQQ',  # 스코틀랜드 군사 (Scottish Military)
+            'EBBU',  # 브뤼셀 (Brussels)
+            'EDGG',  # 랑겐 (Langen)
+            'EDMM',  # 뮌헨 (Munich)
+            'EDUU',  # 라인 UIR (Rhein UIR)
+            'EDWW',  # 브레멘 (Bremen)
+            'EDYY',  # 마스트리흐트 (Maastricht)
+            'EETT',  # 탈린 (Tallinn)
+            'EFIN',  # 핀란드 (Finland)
+            'EHAA',  # 암스테르담 (Amsterdam)
+            'EISN',  # 섀넌 (Shannon)
+            'EKDK',  # 코펜하겐 (Copenhagen)
+            'ENOB',  # 보도 (Bodo)
+            'ENOR',  # 노르웨이 (Norway)
+            'EPWW',  # 바르샤바 (Warszawa)
+            'ESAA',  # 스웨덴 (Sweden)
+            'ESMM',  # 말뫼 (Malmo)
+            'EVRR',  # 리가 (Riga)
+            'EYVL',  # 빌뉴스 (Vilnius)
+            'LFBB',  # 보르도 (Bordeaux)
+            'LFEE',  # 랭스 (Reims)
+            'LFFF',  # 파리 (Paris)
+            'LFMM',  # 마르세유 (Marseille)
+            'LFRR',  # 브레스트 (Brest)
+            'LGGG',  # 아테네 (Athens)
+            'LHCC',  # 부다페스트 (Budapest)
+            'LIBB',  # 브린디시 (Brindisi)
+            'LIMM',  # 밀라노 (Milano)
+            'LIPP',  # 파도바 (Padova)
+            'LIRR',  # 로마 (Roma)
+            'LJLA',  # 류블랴나 (Ljubljana)
+            'LKAA',  # 프라하 (Praha)
+            'LLLL',  # 텔아비브 (Tel-Aviv)
+            'LMMM',  # 몰타 (Malta)
+            'LOVV',  # 비엔나 (Wien)
+            'LPPC',  # 리스본 (Lisboa)
+            'LPPO',  # 산타마리아 (Santa Maria)
+            'LQSB',  # 사라예보 (Sarajevo)
+            'LRBB',  # 부쿠레슈티 (Bucuresti)
+            'LSAG',  # 제네바 (Geneve)
+            'LSAS',  # 스위스 (Switzerland)
+            'LSAZ',  # 취리히 (Zurich)
+            'LTAA',  # 앙카라 (Ankara)
+            'LTBB',  # 이스탄불 (Istanbul)
+            'LUUU',  # 키시나우 (Chisinau)
+            'LWSS',  # 스코페 (Skopje)
+            'LYBA',  # 베오그라드 (Beograd)
+            'LZBB',  # 브라티슬라바 (Bratislava)
+            
+            # 러시아
+            'UUEE',  # 야쿠츠크 (Yakutsk)
+            'UEEE',  # 야쿠츠크 (Yakutsk)
+            'UHHH',  # 하바롭스크 (Khabarovsk)
+            'UHMM',  # 마가단 (Magadan)
+            'UHPP',  # 페트로파블롭스크 (Petropavlovsk-Kamchatsky)
+            'UIII',  # 이르쿠츠크 (Irkutsk)
+            'ULLL',  # 상트페테르부르크 (Sankt-Peterburg)
+            'UMKK',  # 칼리닌그라드 (Kaliningrad)
+            'UNKL',  # 크라스노야르스크 (Krasnoyarsk)
+            'UNNT',  # 노보시비르스크 (Novosibirsk)
+            'URRV',  # 로스토프나도누 (Rostov-Na-Donu)
+            'USSV',  # 예카테린부르크 (Yekaterinburg)
+            'USTV',  # 튜멘 (Tyumen)
+            'UUWV',  # 모스크바 (Moscow)
+            'UWWW',  # 사마라 (Samara)
+            
+            # 아시아
+            'ZBPE',  # 베이징 (Beijing)
+            'ZGZU',  # 광저우 (Guangzhou)
+            'ZHWH',  # 우한 (Wuhan)
+            'ZJSA',  # 싼야 (Sanya)
+            'ZKKP',  # 평양 (Pyongyang)
+            'ZLHW',  # 란저우 (Lanzhou)
+            'ZMUB',  # 울란바토르 (Ulan Bator)
+            'ZPKM',  # 쿤밍 (Kunming)
+            'ZSHA',  # 상하이 (Shanghai)
+            'ZWUQ',  # 우루무치 (Urumqi)
+            'ZYSH',  # 선양 (Shenyang)
+            'VHHK',  # 홍콩 (Hong Kong)
+            'VTBB',  # 방콕 (Bangkok)
+            'VTSM',  # 방콕 (Bangkok)
+            'WIIF',  # 자카르타 (Jakarta)
+            'WAAF',  # 우중판당 (Ujung Pandang)
+            'WBFC',  # 코타키나발루 (Kota Kinabalu)
+            'WMFC',  # 쿠알라룸푸르 (Kuala Lumpur)
+            'WSJC',  # 싱가포르 (Singapore)
+            'RPHI',  # 마닐라 (Manila)
+            'VABF',  # 뭄바이 (Mumbai)
+            'VCCC',  # 콜롬보 (Colombo)
+            'VDPF',  # 프놈펜 (Phnom Penh)
+            'VECF',  # 콜카타 (Kolkata)
+            'VGFR',  # 다카 (Dhaka)
+            'VIDF',  # 델리 (Delhi)
+            'VLVT',  # 비엔티안 (Vientiane)
+            'VNSM',  # 카트만두 (Kathmandu)
+            'VOMF',  # 첸나이 (Chennai)
+            'VRMF',  # 말레 (Male)
+            'VVHM',  # 호치민 (Ho Chi Minh)
+            'VVHN',  # 하노이 (Hanoi)
+            'VYYF',  # 양곤 (Yangon)
+            
+            # 호주/오세아니아
+            'YBBB',  # 브리즈번 (Brisbane)
+            'YMMM',  # 멜버른 (Melbourne)
+            'NZZC',  # 뉴질랜드 (New Zealand)
+            'NZZO',  # 오클랜드 해양 (Auckland Oceanic)
+            'NFFF',  # 피지 (Fiji)
+            'NTTT',  # 타히티 (Tahiti)
+            
+            # 기타 주요 FIR들
+            'OAKX',  # 카불 (Kabul)
+            'OBBB',  # 바레인 (Bahrain)
+            'OEJD',  # 제다 (Jeddah)
+            'OIIX',  # 테헤란 (Tehran)
+            'OJAC',  # 암만 (Amman)
+            'OKAC',  # 쿠웨이트 (Kuwait)
+            'OLBB',  # 베이루트 (Beirut)
+            'OMAE',  # 에미레이트 (Emirates)
+            'OOMM',  # 무스카트 (Muscat)
+            'OPKR',  # 카라치 (Karachi)
+            'OPLR',  # 라호르 (Lahore)
+            'ORBB',  # 바그다드 (Baghdad)
+            'OSTT',  # 다마스쿠스 (Damascus)
+            'OYSC',  # 사나 (Sanaa)
+        ]
+        
+        return code in fir_patterns
+    
+    def _get_fir_timezone(self, fir_code):
+        """FIR 코드에 따른 시간대 반환 (Wikipedia FIR 목록 기반)"""
+        fir_timezones = {
+            # 한국
+            'RKRR': '+09:00',  # 인천 (KST)
+            
+            # 일본
+            'RJJJ': '+09:00',  # 후쿠오카 (JST)
+            'RJBE': '+09:00',  # 고베 (JST)
+            'RJCG': '+09:00',  # 삿포로 (JST)
+            'RJFF': '+09:00',  # 후쿠오카 (JST)
+            'RJTG': '+09:00',  # 도쿄 (JST)
+            
+            # 미국 (주요 시간대별)
+            'KZAB': '-07:00',  # 앨버커키 (MST)
+            'KZAK': '-08:00',  # 오클랜드 해양 (PST)
+            'KZAU': '-06:00',  # 시카고 (CST)
+            'KZBW': '-05:00',  # 보스턴 (EST)
+            'KZDC': '-05:00',  # 워싱턴 (EST)
+            'KZDV': '-07:00',  # 덴버 (MST)
+            'KZFW': '-06:00',  # 포트워스 (CST)
+            'KZHU': '-06:00',  # 휴스턴 (CST)
+            'KZID': '-05:00',  # 인디애나폴리스 (EST)
+            'KZJX': '-05:00',  # 잭슨빌 (EST)
+            'KZKC': '-06:00',  # 캔자스시티 (CST)
+            'KZLA': '-08:00',  # 로스앤젤레스 (PST)
+            'KZLC': '-07:00',  # 솔트레이크 (MST)
+            'KZMA': '-05:00',  # 마이애미 (EST)
+            'KZME': '-06:00',  # 멤피스 (CST)
+            'KZMP': '-06:00',  # 미니애폴리스 (CST)
+            'KZNY': '-05:00',  # 뉴욕 (EST)
+            'KZOA': '-08:00',  # 오클랜드 (PST)
+            'KZOB': '-05:00',  # 클리블랜드 (EST)
+            'KZSE': '-08:00',  # 시애틀 (PST)
+            'KZTL': '-05:00',  # 애틀랜타 (EST)
+            'KZWY': '-05:00',  # 뉴욕 해양 (EST)
+            'PAZA': '-09:00',  # 앵커리지 대륙 (AKST)
+            'PAZN': '-09:00',  # 앵커리지 해양 (AKST)
+            'PHZH': '-10:00',  # 호놀룰루 (HST)
+            
+            # 캐나다
+            'CZEG': '-07:00',  # 에드먼턴 (MST)
+            'CZQM': '-04:00',  # 몽크톤 (AST)
+            'CZQX': '-03:30',  # 간더 (NST)
+            'CZUL': '-05:00',  # 몬트리올 (EST)
+            'CZVR': '-08:00',  # 밴쿠버 (PST)
+            'CZWG': '-06:00',  # 위니펙 (CST)
+            'CZYZ': '-05:00',  # 토론토 (EST)
+            
+            # 유럽 (주요 시간대별)
+            'EGTT': '+00:00',  # 런던 (GMT)
+            'EGGX': '+00:00',  # 센윅 해양 (GMT)
+            'EGPX': '+00:00',  # 스코틀랜드 (GMT)
+            'EGQQ': '+00:00',  # 스코틀랜드 군사 (GMT)
+            'EBBU': '+01:00',  # 브뤼셀 (CET)
+            'EDGG': '+01:00',  # 랑겐 (CET)
+            'EDMM': '+01:00',  # 뮌헨 (CET)
+            'EDUU': '+01:00',  # 라인 UIR (CET)
+            'EDWW': '+01:00',  # 브레멘 (CET)
+            'EDYY': '+01:00',  # 마스트리흐트 (CET)
+            'EETT': '+02:00',  # 탈린 (EET)
+            'EFIN': '+02:00',  # 핀란드 (EET)
+            'EHAA': '+01:00',  # 암스테르담 (CET)
+            'EISN': '+00:00',  # 섀넌 (GMT)
+            'EKDK': '+01:00',  # 코펜하겐 (CET)
+            'ENOB': '+01:00',  # 보도 (CET)
+            'ENOR': '+01:00',  # 노르웨이 (CET)
+            'EPWW': '+01:00',  # 바르샤바 (CET)
+            'ESAA': '+01:00',  # 스웨덴 (CET)
+            'ESMM': '+01:00',  # 말뫼 (CET)
+            'EVRR': '+02:00',  # 리가 (EET)
+            'EYVL': '+02:00',  # 빌뉴스 (EET)
+            'LFBB': '+01:00',  # 보르도 (CET)
+            'LFEE': '+01:00',  # 랭스 (CET)
+            'LFFF': '+01:00',  # 파리 (CET)
+            'LFMM': '+01:00',  # 마르세유 (CET)
+            'LFRR': '+01:00',  # 브레스트 (CET)
+            'LGGG': '+02:00',  # 아테네 (EET)
+            'LHCC': '+01:00',  # 부다페스트 (CET)
+            'LIBB': '+01:00',  # 브린디시 (CET)
+            'LIMM': '+01:00',  # 밀라노 (CET)
+            'LIPP': '+01:00',  # 파도바 (CET)
+            'LIRR': '+01:00',  # 로마 (CET)
+            'LJLA': '+01:00',  # 류블랴나 (CET)
+            'LKAA': '+01:00',  # 프라하 (CET)
+            'LLLL': '+02:00',  # 텔아비브 (IST)
+            'LMMM': '+01:00',  # 몰타 (CET)
+            'LOVV': '+01:00',  # 비엔나 (CET)
+            'LPPC': '+00:00',  # 리스본 (WET)
+            'LPPO': '-01:00',  # 산타마리아 (AZOT)
+            'LQSB': '+01:00',  # 사라예보 (CET)
+            'LRBB': '+02:00',  # 부쿠레슈티 (EET)
+            'LSAG': '+01:00',  # 제네바 (CET)
+            'LSAS': '+01:00',  # 스위스 (CET)
+            'LSAZ': '+01:00',  # 취리히 (CET)
+            'LTAA': '+03:00',  # 앙카라 (TRT)
+            'LTBB': '+03:00',  # 이스탄불 (TRT)
+            'LUUU': '+02:00',  # 키시나우 (EET)
+            'LWSS': '+01:00',  # 스코페 (CET)
+            'LYBA': '+01:00',  # 베오그라드 (CET)
+            'LZBB': '+01:00',  # 브라티슬라바 (CET)
+            
+            # 러시아 (여러 시간대)
+            'UUEE': '+09:00',  # 야쿠츠크 (YAKT)
+            'UEEE': '+09:00',  # 야쿠츠크 (YAKT)
+            'UHHH': '+10:00',  # 하바롭스크 (VLAT)
+            'UHMM': '+11:00',  # 마가단 (MAGT)
+            'UHPP': '+12:00',  # 페트로파블롭스크 (PETT)
+            'UIII': '+08:00',  # 이르쿠츠크 (IRKT)
+            'ULLL': '+03:00',  # 상트페테르부르크 (MSK)
+            'UMKK': '+02:00',  # 칼리닌그라드 (EET)
+            'UNKL': '+07:00',  # 크라스노야르스크 (KRAT)
+            'UNNT': '+07:00',  # 노보시비르스크 (NOVT)
+            'URRV': '+03:00',  # 로스토프나도누 (MSK)
+            'USSV': '+05:00',  # 예카테린부르크 (YEKT)
+            'USTV': '+05:00',  # 튜멘 (YEKT)
+            'UUWV': '+03:00',  # 모스크바 (MSK)
+            'UWWW': '+04:00',  # 사마라 (SAMT)
+            
+            # 아시아
+            'ZBPE': '+08:00',  # 베이징 (CST)
+            'ZGZU': '+08:00',  # 광저우 (CST)
+            'ZHWH': '+08:00',  # 우한 (CST)
+            'ZJSA': '+08:00',  # 싼야 (CST)
+            'ZKKP': '+09:00',  # 평양 (KST)
+            'ZLHW': '+08:00',  # 란저우 (CST)
+            'ZMUB': '+08:00',  # 울란바토르 (ULAT)
+            'ZPKM': '+08:00',  # 쿤밍 (CST)
+            'ZSHA': '+08:00',  # 상하이 (CST)
+            'ZWUQ': '+06:00',  # 우루무치 (XJT)
+            'ZYSH': '+08:00',  # 선양 (CST)
+            'VHHK': '+08:00',  # 홍콩 (HKT)
+            'VTBB': '+07:00',  # 방콕 (ICT)
+            'VTSM': '+07:00',  # 방콕 (ICT)
+            'WIIF': '+07:00',  # 자카르타 (WIB)
+            'WAAF': '+08:00',  # 우중판당 (WITA)
+            'WBFC': '+08:00',  # 코타키나발루 (MYT)
+            'WMFC': '+08:00',  # 쿠알라룸푸르 (MYT)
+            'WSJC': '+08:00',  # 싱가포르 (SGT)
+            'RPHI': '+08:00',  # 마닐라 (PHT)
+            'VABF': '+05:30',  # 뭄바이 (IST)
+            'VCCC': '+05:30',  # 콜롬보 (IST)
+            'VDPF': '+07:00',  # 프놈펜 (ICT)
+            'VECF': '+05:30',  # 콜카타 (IST)
+            'VGFR': '+06:00',  # 다카 (BST)
+            'VIDF': '+05:30',  # 델리 (IST)
+            'VLVT': '+07:00',  # 비엔티안 (ICT)
+            'VNSM': '+05:45',  # 카트만두 (NPT)
+            'VOMF': '+05:30',  # 첸나이 (IST)
+            'VRMF': '+05:00',  # 말레 (MVT)
+            'VVHM': '+07:00',  # 호치민 (ICT)
+            'VVHN': '+07:00',  # 하노이 (ICT)
+            'VYYF': '+06:30',  # 양곤 (MMT)
+            
+            # 호주/오세아니아
+            'YBBB': '+10:00',  # 브리즈번 (AEST)
+            'YMMM': '+10:00',  # 멜버른 (AEST)
+            'NZZC': '+12:00',  # 뉴질랜드 (NZST)
+            'NZZO': '+12:00',  # 오클랜드 해양 (NZST)
+            'NFFF': '+12:00',  # 피지 (FJT)
+            'NTTT': '-10:00',  # 타히티 (TAHT)
+            
+            # 중동/서아시아
+            'OAKX': '+04:30',  # 카불 (AFT)
+            'OBBB': '+03:00',  # 바레인 (AST)
+            'OEJD': '+03:00',  # 제다 (AST)
+            'OIIX': '+03:30',  # 테헤란 (IRST)
+            'OJAC': '+02:00',  # 암만 (EET)
+            'OKAC': '+03:00',  # 쿠웨이트 (AST)
+            'OLBB': '+02:00',  # 베이루트 (EET)
+            'OMAE': '+04:00',  # 에미레이트 (GST)
+            'OOMM': '+04:00',  # 무스카트 (GST)
+            'OPKR': '+05:00',  # 카라치 (PKT)
+            'OPLR': '+05:00',  # 라호르 (PKT)
+            'ORBB': '+03:00',  # 바그다드 (AST)
+            'OSTT': '+02:00',  # 다마스쿠스 (EET)
+            'OYSC': '+03:00',  # 사나 (AST)
+        }
+        
+        return fir_timezones.get(fir_code, '+00:00')  # 기본값: UTC
     
     def _apply_dst_if_needed(self, airport_code, timezone_offset):
         """DST가 필요한 공항에 대해 서머타임 적용"""
@@ -1006,6 +1380,35 @@ class NOTAMFilter:
             except Exception as e:
                 print(f"UFN 시간 파싱 오류: {e}")
         
+        # 1.5. PERM (Permanent) 패턴 추가
+        perm_pattern = r'(?:\d+\.\s+)?(\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2}) - PERM(?:\s+[A-Z]{4}(?:\s+[A-Z\s]+/\d{2})?)?'
+        perm_match = re.search(perm_pattern, notam_text)
+        
+        if perm_match:
+            start_date, start_time = perm_match.groups()
+            try:
+                # 시작 시간 파싱
+                day = int(start_date[:2])
+                month_str = start_date[2:5]
+                year = int('20' + start_date[5:7])
+                
+                month_map = {
+                    'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+                    'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12
+                }
+                month = month_map[month_str]
+                
+                hour, minute = map(int, start_time.split(':'))
+                start_dt = datetime(year, month, day, hour, minute)
+                
+                parsed_notam['effective_time'] = start_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+                parsed_notam['expiry_time'] = 'PERM'
+                
+                return
+                
+            except Exception as e:
+                print(f"PERM 시간 파싱 오류: {e}")
+        
         # 2. WEF/TIL 패턴 (번호 포함) - Package 3 NOTAM 형식 지원
         wef_til_pattern = r'(?:\d+\.\s+)?(\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2}) - (\d{2}[A-Z]{3}\d{2}) (\d{2}:\d{2})(?:\s+[A-Z]{4}(?:\s+[A-Z0-9]+/\d{2})?)?'
         wef_til_match = re.search(wef_til_pattern, notam_text)
@@ -1141,6 +1544,9 @@ class NOTAMFilter:
             if expiry_time == 'UFN':
                 # UFN인 경우
                 local_time_str = f"{local_start.strftime('%m/%d %H:%M')} - UFN ({timezone_offset})"
+            elif expiry_time == 'PERM':
+                # PERM인 경우
+                local_time_str = f"{local_start.strftime('%m/%d %H:%M')} - PERM ({timezone_offset})"
             elif expiry_time:
                 # 일반적인 만료 시간이 있는 경우
                 expiry_dt = datetime.fromisoformat(expiry_time.replace('Z', '+00:00'))
@@ -1161,6 +1567,10 @@ class NOTAMFilter:
             
         except Exception as e:
             print(f"시간 포맷팅 오류: {e}")
+            print(f"  effective_time: {effective_time}")
+            print(f"  expiry_time: {expiry_time}")
+            print(f"  airport_code: {airport_code}")
+            print(f"  timezone_offset: {timezone_offset}")
             return None
     
     def _convert_d_field_to_local_time(self, d_field, timezone_offset):

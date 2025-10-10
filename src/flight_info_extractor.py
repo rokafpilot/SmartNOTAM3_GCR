@@ -153,70 +153,37 @@ class FlightInfoExtractor:
         print(f"추출된 package_info: {package_info}")
         print("=== 디버깅 완료 ===")
         
-        # PACKAGE 2에서 REFILE, EDTO 추출 (패턴 기반)
+        # REFILE과 EDTO 추출 (DEP/DEST와 동일한 방식)
         # REFILE: PANC PAED 형태에서 추출
-        # EDTO: RJCC PANC CYVR 형태에서 추출
+        # EDTO: RJCC PACD CYVR 형태에서 추출
         for i, line in enumerate(original_lines):
             line_upper = line.upper().strip()
             
-            # REFILE: PANC PAED 형태에서 추출
+            # REFILE: PANC PAED 형태에서 추출 (DEP/DEST와 동일한 방식)
             if 'REFILE:' in line_upper and 'refile' not in package_info:
-                # 라인이 REFILE: 로 시작하는지 확인
-                if line_upper.startswith('REFILE:'):
-                    refile_match = re.search(r'REFILE:\s*((?:[A-Z]{4}\s*)+)', line_upper)
-                    if refile_match:
-                        airports_text = refile_match.group(1).strip()
-                        airports = re.findall(self.airport_pattern, airports_text)
-                        valid_airports = [airport for airport in airports if self._is_valid_airport(airport)]
-                        if valid_airports:
-                            package_info['refile'] = ' '.join(valid_airports)
-                            print(f"REFILE 추출 (라인 {i+1}): {package_info['refile']}")
+                print(f"REFILE 라인 발견 (라인 {i+1}): '{line}'")
+                # DEP/DEST와 동일한 패턴으로 추출
+                refile_match = re.search(r'REFILE:\s*([A-Z\s]+)', line_upper)
+                if refile_match:
+                    airports_text = refile_match.group(1).strip()
+                    airports = re.findall(self.airport_pattern, airports_text)
+                    valid_airports = [airport for airport in airports if self._is_valid_airport(airport)]
+                    if valid_airports:
+                        package_info['refile'] = ' '.join(valid_airports)
+                        print(f"REFILE 추출 (라인 {i+1}): {package_info['refile']}")
             
-            # EDTO: RJCC PANC CYVR 형태에서 추출
+            # EDTO: RJCC PACD CYVR 형태에서 추출 (DEP/DEST와 동일한 방식)
             if 'EDTO:' in line_upper and 'edto' not in package_info:
-                # 라인이 EDTO: 로 시작하는지 확인
-                if line_upper.startswith('EDTO:'):
-                    edto_match = re.search(r'EDTO:\s*((?:[A-Z]{4}\s*)+)', line_upper)
-                    if edto_match:
-                        airports_text = edto_match.group(1).strip()
-                        airports = re.findall(self.airport_pattern, airports_text)
-                        valid_airports = [airport for airport in airports if self._is_valid_airport(airport)]
-                        if valid_airports:
-                            package_info['edto'] = ' '.join(valid_airports)
-                            print(f"EDTO 추출 (라인 {i+1}): {package_info['edto']}")
-        
-        # 추가 검색: REFILE과 EDTO가 다른 형태로 있을 수 있음
-        if 'refile' not in package_info:
-            for i, line in enumerate(original_lines):
-                line_upper = line.upper().strip()
-                if 'REFILE:' in line_upper:
-                    print(f"REFILE 라인 발견 (라인 {i+1}): '{line}'")
-                    # 더 유연한 패턴으로 시도
-                    refile_match = re.search(r'REFILE:\s*([A-Z\s]+)', line_upper)
-                    if refile_match:
-                        airports_text = refile_match.group(1).strip()
-                        airports = re.findall(self.airport_pattern, airports_text)
-                        valid_airports = [airport for airport in airports if self._is_valid_airport(airport)]
-                        if valid_airports:
-                            package_info['refile'] = ' '.join(valid_airports)
-                            print(f"REFILE 추출 (라인 {i+1}): {package_info['refile']}")
-                            break
-        
-        if 'edto' not in package_info:
-            for i, line in enumerate(original_lines):
-                line_upper = line.upper().strip()
-                if 'EDTO:' in line_upper:
-                    print(f"EDTO 라인 발견 (라인 {i+1}): '{line}'")
-                    # 더 유연한 패턴으로 시도
-                    edto_match = re.search(r'EDTO:\s*([A-Z\s]+)', line_upper)
-                    if edto_match:
-                        airports_text = edto_match.group(1).strip()
-                        airports = re.findall(self.airport_pattern, airports_text)
-                        valid_airports = [airport for airport in airports if self._is_valid_airport(airport)]
-                        if valid_airports:
-                            package_info['edto'] = ' '.join(valid_airports)
-                            print(f"EDTO 추출 (라인 {i+1}): {package_info['edto']}")
-                            break
+                print(f"EDTO 라인 발견 (라인 {i+1}): '{line}'")
+                # DEP/DEST와 동일한 패턴으로 추출
+                edto_match = re.search(r'EDTO:\s*([A-Z\s]+)', line_upper)
+                if edto_match:
+                    airports_text = edto_match.group(1).strip()
+                    airports = re.findall(self.airport_pattern, airports_text)
+                    valid_airports = [airport for airport in airports if self._is_valid_airport(airport)]
+                    if valid_airports:
+                        package_info['edto'] = ' '.join(valid_airports)
+                        print(f"EDTO 추출 (라인 {i+1}): {package_info['edto']}")
         
         return package_info
     

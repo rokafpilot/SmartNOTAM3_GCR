@@ -217,8 +217,13 @@ def analyze_flight_airports_comprehensive(dep: str, dest: str, altn: str = None,
     
     if altn:
         airports['ALTN'] = altn
+    
+    # EDTO 처리: 여러 공항이 있을 수 있으므로 개별적으로 처리
     if edto:
-        airports['EDTO'] = edto
+        edto_airports = edto.split()  # 공백으로 분리
+        for i, airport_code in enumerate(edto_airports):
+            if airport_code.strip():  # 빈 문자열 제외
+                airports[f'EDTO_{i+1}'] = airport_code.strip()
     
     results = {}
     for airport_type, airport_code in airports.items():

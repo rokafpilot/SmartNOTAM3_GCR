@@ -172,18 +172,19 @@ class FlightInfoExtractor:
                         package_info['refile'] = ' '.join(valid_airports)
                         print(f"REFILE 추출 (라인 {i+1}): {package_info['refile']}")
             
-            # EDTO: RJCC PACD CYVR 형태에서 추출 (DEP/DEST와 동일한 방식)
+            # EDTO: RJCC PACD CYVR 형태에서 추출 (모든 공항 포함)
             if 'EDTO:' in line_upper and 'edto' not in package_info:
                 print(f"EDTO 라인 발견 (라인 {i+1}): '{line}'")
-                # DEP/DEST와 동일한 패턴으로 추출
+                # EDTO 패턴으로 추출
                 edto_match = re.search(r'EDTO:\s*([A-Z\s]+)', line_upper)
                 if edto_match:
                     airports_text = edto_match.group(1).strip()
                     airports = re.findall(self.airport_pattern, airports_text)
                     valid_airports = [airport for airport in airports if self._is_valid_airport(airport)]
                     if valid_airports:
+                        # EDTO는 모든 공항을 공백으로 구분하여 저장
                         package_info['edto'] = ' '.join(valid_airports)
-                        print(f"EDTO 추출 (라인 {i+1}): {package_info['edto']}")
+                        print(f"EDTO 추출 (라인 {i+1}): {package_info['edto']} (개별: {valid_airports})")
         
         return package_info
     

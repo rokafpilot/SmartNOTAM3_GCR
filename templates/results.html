@@ -282,6 +282,104 @@
                 </div>
             </div>
         </div>
+        
+        <!-- 공항별 NOTAM 분석 섹션 -->
+        <div class="row mt-4">
+            <div class="col-md-12">
+                <div class="card shadow">
+                    <div class="card-header bg-success text-white">
+                        <h4 class="mb-0">
+                            <i class="fas fa-plane-departure me-2"></i>
+                            공항별 주요 NOTAM 분석
+                        </h4>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted mb-3">
+                            NOTAM에서 자동으로 추출된 공항 정보를 기반으로 주요 NOTAM 사항을 정리 분석합니다.
+                        </p>
+                        
+                        <!-- 추출된 공항 정보 표시 -->
+                        <div id="extractedAirportInfo" class="mb-4" style="display: none;">
+                            <div class="alert alert-info">
+                                <h6 class="alert-heading">📋 추출된 공항 정보</h6>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <table class="table table-sm mb-0">
+                                            <tr>
+                                                <td><strong>DEP (출발):</strong></td>
+                                                <td>
+                                                    <input type="text" class="form-control form-control-sm" id="editDep" placeholder="RKSI" maxlength="4">
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>DEST (목적지):</strong></td>
+                                                <td>
+                                                    <input type="text" class="form-control form-control-sm" id="editDest" placeholder="KSEA" maxlength="4">
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>ALTN (대체):</strong></td>
+                                                <td>
+                                                    <input type="text" class="form-control form-control-sm" id="editAltn" placeholder="KPDX" maxlength="20">
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <table class="table table-sm mb-0">
+                                            <tr>
+                                                <td><strong>REFILE:</strong></td>
+                                                <td>
+                                                    <input type="text" class="form-control form-control-sm" id="editRefile" placeholder="PANC PAED" maxlength="20">
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td><strong>EDTO:</strong></td>
+                                                <td>
+                                                    <input type="text" class="form-control form-control-sm" id="editEdto" placeholder="RJCC PANC CYVR" maxlength="30">
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <small class="text-muted">
+                                        💡 추출된 정보가 부정확할 수 있습니다. 필요시 수정 후 분석을 진행하세요.
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 분석 버튼들 -->
+                        <div class="d-grid gap-2">
+                            <button type="button" class="btn btn-success btn-lg" id="startAirportAnalysisBtn">
+                                <i class="fas fa-search me-2"></i>
+                                공항별 NOTAM 분석 시작
+                            </button>
+                            <button type="button" class="btn btn-info btn-lg" id="comprehensiveAnalysisBtn">
+                                <i class="fas fa-brain me-2"></i>
+                                AI 종합 분석 (GEMINI)
+                            </button>
+                        </div>
+                        
+                        <!-- 분석 결과 표시 영역 -->
+                        <div id="airportAnalysisResult" class="mt-4" style="display: none;">
+                            <div class="card">
+                                <div class="card-header bg-info text-white">
+                                    <h5 class="mb-0">
+                                        <i class="fas fa-chart-bar me-2"></i>
+                                        분석 결과
+                                    </h5>
+                                </div>
+                                <div class="card-body" id="airportAnalysisContent">
+                                    <!-- 분석 결과가 여기에 표시됩니다 -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- NOTAM 목록 -->
         <div id="notamContainer">
@@ -1025,23 +1123,69 @@
             const notamItems = document.querySelectorAll('.notam-item');
             const notamData = [];
             
+            console.log('=== collectCurrentNotamData 디버깅 ===');
+            console.log('찾은 NOTAM 아이템 수:', notamItems.length);
+            
             notamItems.forEach((item, index) => {
-                const notamNumber = item.querySelector('td')?.textContent?.trim() || '';
+                // NOTAM 번호 추출 (card-title에서)
+                const notamNumber = item.querySelector('.card-title')?.textContent?.trim() || `NOTAM_${index + 1}`;
+                
+                // 공항 코드 추출 (bg-info 배지)
                 const airportBadges = item.querySelectorAll('.badge.bg-info');
                 const airports = Array.from(airportBadges).map(badge => badge.textContent.trim());
-                const notamText = item.querySelector('.notam-text')?.textContent?.trim() || '';
-                const effectiveTime = item.querySelector('[data-effective-time]')?.dataset.effectiveTime || '';
-                const expiryTime = item.querySelector('[data-expiry-time]')?.dataset.expiryTime || '';
+                
+                // NOTAM 텍스트 추출 (translation-text에서)
+                const notamText = item.querySelector('.translation-text')?.textContent?.trim() || '';
+                const description = item.querySelector('.notam-description')?.textContent?.trim() || '';
+                
+                // 시간 정보 추출
+                const effectiveTime = item.getAttribute('data-effective-time') || '';
+                const expiryTime = item.getAttribute('data-expiry-time') || '';
+                
+                console.log(`NOTAM ${index + 1}:`, {
+                    notamNumber,
+                    airports,
+                    textLength: notamText.length,
+                    descriptionLength: description.length,
+                    effectiveTime,
+                    expiryTime
+                });
+                
+                // 🔍 실제 NOTAM 텍스트 구조 확인 (처음 5줄만)
+                if (notamText) {
+                    const lines = notamText.split('\n');
+                    console.log(`NOTAM ${index + 1} 텍스트 구조 (처음 5줄):`);
+                    for (let i = 0; i < Math.min(5, lines.length); i++) {
+                        console.log(`  줄 ${i + 1}: '${lines[i]}'`);
+                    }
+                }
                 
                 notamData.push({
                     index: index + 1,
                     notam_number: notamNumber,
                     airports: airports,
                     text: notamText,
+                    description: description,
                     effective_time: effectiveTime,
                     expiry_time: expiryTime
                 });
             });
+            
+            // 원본 NOTAM 텍스트 저장 (공항 정보 추출용)
+            if (notamData.length > 0) {
+                const fullNotamText = notamData.map(notam => notam.text).join('\n');
+                window.originalNotamText = fullNotamText;
+                console.log('원본 NOTAM 텍스트 저장:', fullNotamText.length, '문자');
+                
+                // 🔍 전체 NOTAM 텍스트 구조 확인 (처음 10줄만)
+                const lines = fullNotamText.split('\n');
+                console.log('=== 전체 NOTAM 텍스트 구조 (처음 10줄) ===');
+                for (let i = 0; i < Math.min(10, lines.length); i++) {
+                    console.log(`줄 ${i + 1}: '${lines[i]}'`);
+                }
+            } else {
+                console.log('⚠️ NOTAM 데이터가 없습니다!');
+            }
             
             return notamData;
         }
@@ -1050,10 +1194,14 @@
             const resultDiv = document.getElementById('routeAnalysisResult');
             const contentDiv = document.getElementById('routeAnalysisContent');
             
+            // FIR 기반 분석 결과 처리 (비활성화)
+            let firAnalysisHtml = '';
+            
             // AI 분석 결과를 마크다운 형식으로 표시
-            const formattedAnalysis = formatMarkdownToHTML(result.analysis);
+            const formattedAnalysis = formatMarkdownToHTML(result.gemini_analysis || result.analysis || '');
             
             contentDiv.innerHTML = `
+                ${firAnalysisHtml}
                 <div class="alert alert-success mb-3">
                     <h5 class="alert-heading">🤖 AI 기반 항로 분석 결과</h5>
                     <p class="mb-0"><strong>분석 항로:</strong> ${result.route}</p>
@@ -1450,6 +1598,775 @@
                 filterStatusContent.innerHTML = `전체 NOTAM: <strong style="color: #198754;">${totalNotams}개</strong> (현재 ${visibleNotams.length}개 표시 중)`;
             }
         }
+        
+        // NOTAM 데이터 가져오기 함수
+        function getNotamData() {
+            try {
+                // 페이지의 NOTAM 데이터 수집
+                const notamItems = document.querySelectorAll('.notam-item');
+                const notamData = [];
+                
+                notamItems.forEach((item, index) => {
+                    // NOTAM 번호 추출
+                    const notamNumber = item.querySelector('.card-title')?.textContent?.trim() || `NOTAM_${index + 1}`;
+                    
+                    // 공항 코드 추출 (bg-info 배지)
+                    const airportBadges = item.querySelectorAll('.badge.bg-info');
+                    const airports = Array.from(airportBadges).map(badge => badge.textContent.trim());
+                    
+                    // NOTAM 텍스트 추출
+                    const text = item.querySelector('.translation-text')?.textContent?.trim() || '';
+                    const description = item.querySelector('.notam-description')?.textContent?.trim() || '';
+                    
+                    // 시간 정보 추출
+                    const effectiveTime = item.getAttribute('data-effective-time') || '';
+                    const expiryTime = item.getAttribute('data-expiry-time') || '';
+                    
+                    notamData.push({
+                        index: index + 1,
+                        notam_number: notamNumber,
+                        airports: airports,
+                        text: text,
+                        description: description,
+                        effective_time: effectiveTime,
+                        expiry_time: expiryTime
+                    });
+                });
+                
+                console.log(`getNotamData: ${notamData.length}개 NOTAM 수집`);
+                return notamData;
+            } catch (error) {
+                console.error('getNotamData 오류:', error);
+                return [];
+            }
+        }
+        
+        // 공항별 NOTAM 분석 버튼 처리
+        document.getElementById('startAirportAnalysisBtn').addEventListener('click', async function() {
+            const btn = this;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>분석 중...';
+            btn.disabled = true;
+            
+            // 추출된 공항 정보 사용 (UI 입력 필드 우선, 없으면 자동 추출된 정보 사용)
+            let dep = document.getElementById('editDep')?.value?.trim() || '';
+            let dest = document.getElementById('editDest')?.value?.trim() || '';
+            let altn = document.getElementById('editAltn')?.value?.trim() || '';
+            let refile = document.getElementById('editRefile')?.value?.trim() || '';
+            let edto = document.getElementById('editEdto')?.value?.trim() || '';
+            
+            console.log('=== 공항 정보 수집 디버깅 ===');
+            console.log('UI 입력 필드 값들:', { dep, dest, altn, refile, edto });
+            console.log('editDep 요소:', document.getElementById('editDep'));
+            console.log('editDep 값:', document.getElementById('editDep')?.value);
+            console.log('editDest 요소:', document.getElementById('editDest'));
+            console.log('editDest 값:', document.getElementById('editDest')?.value);
+            
+            // UI 입력 필드가 비어있으면 자동 추출된 정보 사용
+            if (!dep || !dest) {
+                const flightInfo = window.extractedFlightInfo;
+                console.log('window.extractedFlightInfo:', flightInfo);
+                if (flightInfo) {
+                    dep = dep || flightInfo.dep || '';
+                    dest = dest || flightInfo.dest || '';
+                    altn = altn || flightInfo.altn || '';
+                    refile = refile || flightInfo.refile || '';
+                    edto = edto || flightInfo.edto || '';
+                    console.log('자동 추출된 공항 정보 사용:', { dep, dest, altn, refile, edto });
+                }
+            } else {
+                console.log('UI에서 가져온 공항 정보:', { dep, dest, altn, refile, edto });
+            }
+            
+            if (!dep || !dest) {
+                showAirportAnalysisError('DEP(출발)과 DEST(목적지) 공항 정보를 입력해주세요.');
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                return;
+            }
+            
+            const data = {
+                dep: dep,
+                dest: dest,
+                altn: altn || null,
+                edto: edto || null,
+                notam_data: window.currentNotamData || getNotamData()
+            };
+            
+            
+            try {
+                const response = await fetch('/api/analyze_airports', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    displayAirportAnalysisResult(result);
+                } else {
+                    const error = await response.json();
+                    showAirportAnalysisError(error.error || '분석 중 오류가 발생했습니다.');
+                }
+            } catch (error) {
+                console.error('공항별 NOTAM 분석 오류:', error);
+                showAirportAnalysisError('네트워크 오류가 발생했습니다.');
+            } finally {
+                // 버튼 상태 복원
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        });
+        
+        // AI 종합 분석 버튼 처리
+        document.getElementById('comprehensiveAnalysisBtn').addEventListener('click', async function() {
+            const btn = this;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>AI 분석 중...';
+            btn.disabled = true;
+            
+            // 추출된 공항 정보 사용 (UI 입력 필드 우선, 없으면 자동 추출된 정보 사용)
+            let dep = document.getElementById('editDep')?.value?.trim() || '';
+            let dest = document.getElementById('editDest')?.value?.trim() || '';
+            let altn = document.getElementById('editAltn')?.value?.trim() || '';
+            let refile = document.getElementById('editRefile')?.value?.trim() || '';
+            let edto = document.getElementById('editEdto')?.value?.trim() || '';
+            
+            console.log('=== AI 분석 공항 정보 수집 디버깅 ===');
+            console.log('UI 입력 필드 값들:', { dep, dest, altn, refile, edto });
+            console.log('editDep 요소:', document.getElementById('editDep'));
+            console.log('editDep 값:', document.getElementById('editDep')?.value);
+            console.log('editDest 요소:', document.getElementById('editDest'));
+            console.log('editDest 값:', document.getElementById('editDest')?.value);
+            
+            // UI 입력 필드가 비어있으면 자동 추출된 정보 사용
+            if (!dep || !dest) {
+                const flightInfo = window.extractedFlightInfo;
+                console.log('window.extractedFlightInfo:', flightInfo);
+                if (flightInfo) {
+                    dep = dep || flightInfo.dep || '';
+                    dest = dest || flightInfo.dest || '';
+                    altn = altn || flightInfo.altn || '';
+                    refile = refile || flightInfo.refile || '';
+                    edto = edto || flightInfo.edto || '';
+                    console.log('AI 분석 - 자동 추출된 공항 정보 사용:', { dep, dest, altn, refile, edto });
+                }
+            } else {
+                console.log('AI 분석 - UI에서 가져온 공항 정보:', { dep, dest, altn, refile, edto });
+            }
+            
+            if (!dep || !dest) {
+                showAirportAnalysisError('DEP(출발)과 DEST(목적지) 공항 정보를 입력해주세요.');
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                return;
+            }
+            
+            const data = {
+                dep: dep,
+                dest: dest,
+                altn: altn || null,
+                edto: edto || null,
+                notam_data: window.currentNotamData || getNotamData()
+            };
+            
+            
+            try {
+                const response = await fetch('/api/analyze_airports_comprehensive', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    displayComprehensiveAnalysisResult(result);
+                } else {
+                    const error = await response.json();
+                    showAirportAnalysisError(error.error || 'AI 분석 중 오류가 발생했습니다.');
+                }
+            } catch (error) {
+                console.error('AI 종합 분석 오류:', error);
+                showAirportAnalysisError('네트워크 오류가 발생했습니다.');
+            } finally {
+                // 버튼 상태 복원
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        });
+        
+        // 공항별 NOTAM 분석 결과 표시
+        function displayAirportAnalysisResult(result) {
+            const resultDiv = document.getElementById('airportAnalysisResult');
+            const contentDiv = document.getElementById('airportAnalysisContent');
+            
+            // 안전한 데이터 접근을 위한 검증
+            if (!result || !result.analysis_result || !result.analysis_result.summary) {
+                console.error('분석 결과 데이터가 올바르지 않습니다:', result);
+                showAirportAnalysisError('분석 결과 데이터가 올바르지 않습니다.');
+                return;
+            }
+            
+            const analysis = result.analysis_result;
+            const summary = analysis.summary;
+            
+            // 안전한 배열 접근
+            const criticalAirports = summary.critical_airports || [];
+            const totalAirports = summary.total_airports || 0;
+            const totalNotams = summary.total_notams || 0;
+            const overallStatus = summary.overall_status || 'UNKNOWN';
+            
+            let html = `
+                <div class="alert alert-info">
+                    <h6 class="alert-heading">📊 전체 요약</h6>
+                    <p class="mb-2">
+                        <strong>분석 공항:</strong> ${totalAirports}개 | 
+                        <strong>총 NOTAM:</strong> ${totalNotams}개 | 
+                        <strong>상태:</strong> 
+                        <span class="badge ${overallStatus === 'CRITICAL' ? 'bg-danger' : 'bg-success'}">
+                            ${overallStatus === 'CRITICAL' ? '🚨 주의 필요' : '✅ 정상'}
+                        </span>
+                    </p>
+                    ${criticalAirports.length > 0 ? 
+                        `<p class="mb-0"><strong>주의 공항:</strong> ${criticalAirports.join(', ')}</p>` : 
+                        '<p class="mb-0">모든 공항이 정상 상태입니다.</p>'
+                    }
+                </div>
+            `;
+            
+            // 각 공항별 분석 결과
+            const airports = analysis.airports || {};
+            Object.entries(airports).forEach(([airportType, airportData]) => {
+                // 안전한 데이터 접근
+                const airportCode = airportData?.airport_code || 'N/A';
+                const totalNotams = airportData?.total_notams || 0;
+                const priorityCounts = airportData?.priority_summary?.counts || {};
+                
+                html += `
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">
+                                <i class="fas fa-plane me-2"></i>
+                                ${airportType} - ${airportCode}
+                                <span class="badge bg-primary ms-2">${totalNotams}개 NOTAM</span>
+                            </h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-8">
+                                    <h6>📋 분석 요약</h6>
+                                    <div class="mb-2">${(airportData?.analysis || '분석 데이터가 없습니다.').replace(/\n/g, '<br>')}</div>
+                                    
+                                    ${(airportData?.key_issues || []).length > 0 ? `
+                                        <h6>🚨 주요 이슈</h6>
+                                        <ul class="list-unstyled">
+                                            ${(airportData.key_issues || []).map(issue => `<li>${issue}</li>`).join('')}
+                                        </ul>
+                                    ` : ''}
+                                    
+                                    <h6>💡 권장사항</h6>
+                                    <ul class="list-unstyled">
+                                        ${(airportData?.recommendations || ['권장사항이 없습니다.']).map(rec => `<li>${rec}</li>`).join('')}
+                                    </ul>
+                                </div>
+                                <div class="col-md-4">
+                                    <h6>📊 우선순위별 분포</h6>
+                                    ${priorityCounts.critical > 0 ? `<div class="mb-1"><span class="badge bg-danger">Critical: ${priorityCounts.critical}</span></div>` : ''}
+                                    ${priorityCounts.high > 0 ? `<div class="mb-1"><span class="badge bg-warning">High: ${priorityCounts.high}</span></div>` : ''}
+                                    ${priorityCounts.medium > 0 ? `<div class="mb-1"><span class="badge bg-info">Medium: ${priorityCounts.medium}</span></div>` : ''}
+                                    ${priorityCounts.low > 0 ? `<div class="mb-1"><span class="badge bg-secondary">Low: ${priorityCounts.low}</span></div>` : ''}
+                                    
+                                    <h6 class="mt-3">📂 카테고리별 분포</h6>
+                                    ${Object.entries(airportData.categories).filter(([cat, notams]) => notams.length > 0).map(([cat, notams]) => 
+                                        `<div class="mb-1"><span class="badge bg-light text-dark">${cat}: ${notams.length}</span></div>`
+                                    ).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            contentDiv.innerHTML = html;
+            resultDiv.style.display = 'block';
+            
+            // 결과 영역으로 스크롤
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        // AI 종합 분석 결과 표시
+        function displayComprehensiveAnalysisResult(result) {
+            const resultDiv = document.getElementById('airportAnalysisResult');
+            const contentDiv = document.getElementById('airportAnalysisContent');
+            
+            const analysis = result.analysis_result;
+            const summary = analysis.summary;
+            
+            let html = `
+                <div class="alert alert-info">
+                    <h6 class="alert-heading">🤖 AI 종합 분석 결과 (GEMINI)</h6>
+                    <p class="mb-2">
+                        <strong>분석 공항:</strong> ${summary.total_airports}개 | 
+                        <strong>총 NOTAM:</strong> ${summary.total_notams}개 | 
+                        <strong>분석 방식:</strong> ${summary.analysis_type}
+                    </p>
+                </div>
+            `;
+            
+            // 각 공항별 종합 분석 결과
+            Object.entries(airports).forEach(([airportType, airportData]) => {
+                const airportCode = airportData?.airport_code || 'N/A';
+                
+                html += `
+                    <div class="card mb-3">
+                        <div class="card-header bg-info text-white">
+                            <h6 class="mb-0">
+                                <i class="fas fa-brain me-2"></i>
+                                ${airportType} - ${airportCode} (AI 종합 분석)
+                            </h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <h6>📋 AI 분석 요약</h6>
+                                    <div class="mb-3">${airportData?.summary || 'AI 분석 요약이 없습니다.'}</div>
+                                    
+                                    ${(airportData?.critical_issues || []).length > 0 ? `
+                                        <h6>🚨 Critical 이슈</h6>
+                                        <div class="mb-3">
+                                            ${(airportData.critical_issues || []).map(issue => `
+                                                <div class="alert alert-danger mb-2">
+                                                    <strong>${issue?.category || 'N/A'}:</strong> ${issue?.issue || 'N/A'}<br>
+                                                    <small><strong>영향:</strong> ${issue?.impact || 'N/A'}</small><br>
+                                                    <small><strong>참조:</strong> ${(issue?.notam_refs || []).join(', ')}</small>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+                                    
+                                    ${(airportData?.approach_landing_guidance || []).length > 0 ? `
+                                        <h6>🛬 접근 및 착륙 가이드</h6>
+                                        <div class="mb-3">
+                                            ${(airportData.approach_landing_guidance || []).map(guide => `
+                                                <div class="card mb-2">
+                                                    <div class="card-body">
+                                                        <h6 class="card-title">${guide?.runway || 'N/A'} - ${guide?.approach_type || 'N/A'}</h6>
+                                                        <p class="card-text"><strong>제한사항:</strong> ${guide?.restrictions || 'N/A'}</p>
+                                                        <p class="card-text"><strong>권장사항:</strong> ${guide?.recommendations || 'N/A'}</p>
+                                                    </div>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+                                    
+                                    ${airportData.ground_operations && airportData.ground_operations.length > 0 ? `
+                                        <h6>🛬 지상운영 가이드</h6>
+                                        <div class="mb-3">
+                                            ${airportData.ground_operations.map(ops => `
+                                                <div class="card mb-2">
+                                                    <div class="card-body">
+                                                        <h6 class="card-title">${ops.area}</h6>
+                                                        <p class="card-text"><strong>제한사항:</strong> ${ops.restrictions}</p>
+                                                        <p class="card-text"><strong>대안:</strong> ${ops.alternatives}</p>
+                                                    </div>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+                                    
+                                    ${airportData.recommendations && airportData.recommendations.length > 0 ? `
+                                        <h6>💡 AI 권장사항</h6>
+                                        <ul class="list-unstyled">
+                                            ${airportData.recommendations.map(rec => `<li class="mb-1">• ${rec}</li>`).join('')}
+                                        </ul>
+                                    ` : ''}
+                                    
+                                    ${airportData.gemini_analysis ? `
+                                        <h6>🤖 GEMINI AI 원본 분석</h6>
+                                        <div class="alert alert-light">
+                                            <pre style="white-space: pre-wrap; font-size: 0.9em;">${airportData.gemini_analysis}</pre>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            contentDiv.innerHTML = html;
+            resultDiv.style.display = 'block';
+            
+            // 결과 영역으로 스크롤
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        // 공항별 NOTAM 분석 오류 표시
+        function showAirportAnalysisError(message) {
+            const resultDiv = document.getElementById('airportAnalysisResult');
+            const contentDiv = document.getElementById('airportAnalysisContent');
+            
+            contentDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <h6 class="alert-heading">❌ 분석 오류</h6>
+                    <p class="mb-0">${message}</p>
+                </div>
+            `;
+            
+            resultDiv.style.display = 'block';
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        // 페이지 로드 시 자동으로 공항 정보 추출
+        async function autoExtractFlightInfo() {
+            try {
+                console.log('=== 공항 정보 자동 추출 시작 ===');
+                
+                // NOTAM 텍스트 수집
+                if (!window.originalNotamText) {
+                    console.log('NOTAM 텍스트 수집 중...');
+                    collectCurrentNotamData(); // NOTAM 텍스트 수집
+                }
+                
+                const notamText = window.originalNotamText || '';
+                console.log('NOTAM 텍스트:', notamText ? `${notamText.length} 문자` : '없음');
+                
+                if (!notamText) {
+                    console.log('NOTAM 텍스트가 없어서 공항 정보 추출을 건너뜁니다.');
+                    return;
+                }
+                
+                console.log('API 호출 시작...');
+                
+                const response = await fetch('/api/extract_flight_info', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        notam_text: notamText
+                    })
+                });
+                
+                console.log('API 응답 상태:', response.status);
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('공항 정보 추출 성공:', result.flight_info);
+                    
+                    // 추출된 정보를 표시 영역에 표시
+                    displayExtractedAirportInfo(result.flight_info);
+                    
+                    // 추출 성공 알림
+                    showExtractionSuccess(result.flight_info);
+                } else {
+                    const errorText = await response.text();
+                    console.error('공항 정보 추출 API 오류:', response.status, errorText);
+                    
+                    // 오류 알림 표시
+                    showExtractionError(`API 오류 (${response.status}): ${errorText}`);
+                }
+            } catch (error) {
+                console.error('공항 정보 자동 추출 오류:', error);
+                // 네트워크 오류 알림 표시
+                showExtractionError(`네트워크 오류: ${error.message}`);
+            }
+        }
+        
+        // 추출 오류 알림 표시
+        function showExtractionError(message) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = 'alert alert-warning alert-dismissible fade show extraction-alert';
+            alertDiv.style.position = 'fixed';
+            alertDiv.style.top = '20px';
+            alertDiv.style.right = '20px';
+            alertDiv.style.zIndex = '9999';
+            alertDiv.style.minWidth = '400px';
+            
+            alertDiv.innerHTML = `
+                <h6 class="alert-heading">⚠️ 공항 정보 추출 오류</h6>
+                <p class="mb-2">${message}</p>
+                <p class="mb-0">수동으로 공항 정보를 입력하거나 페이지를 새로고침해주세요.</p>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            document.body.appendChild(alertDiv);
+            
+            // 10초 후 자동 제거
+            setTimeout(() => {
+                if (alertDiv.parentNode) {
+                    alertDiv.remove();
+                }
+            }, 10000);
+        }
+        
+        // 추출된 공항 정보 표시
+        function displayExtractedAirportInfo(flightInfo) {
+            console.log('=== displayExtractedAirportInfo 디버깅 ===');
+            console.log('받은 flightInfo:', flightInfo);
+            
+            // 표시 영역 표시
+            const displayDiv = document.getElementById('extractedAirportInfo');
+            console.log('extractedAirportInfo div:', displayDiv);
+            if (displayDiv) {
+                displayDiv.style.display = 'block';
+            }
+            
+            // 각 공항 정보를 입력 필드에 자동 채우기
+            const depField = document.getElementById('editDep');
+            const destField = document.getElementById('editDest');
+            const altnField = document.getElementById('editAltn');
+            const refileField = document.getElementById('editRefile');
+            const edtoField = document.getElementById('editEdto');
+            
+            console.log('입력 필드들:', { depField, destField, altnField, refileField, edtoField });
+            
+            if (flightInfo.dep && depField) {
+                depField.value = flightInfo.dep;
+                console.log('DEP 설정:', flightInfo.dep);
+            }
+            if (flightInfo.dest && destField) {
+                destField.value = flightInfo.dest;
+                console.log('DEST 설정:', flightInfo.dest);
+            }
+            if (flightInfo.altn && altnField) {
+                altnField.value = flightInfo.altn;
+                console.log('ALTN 설정:', flightInfo.altn);
+            }
+            if (flightInfo.refile && refileField) {
+                refileField.value = flightInfo.refile;
+                console.log('REFILE 설정:', flightInfo.refile);
+            }
+            if (flightInfo.edto && edtoField) {
+                edtoField.value = flightInfo.edto;
+                console.log('EDTO 설정:', flightInfo.edto);
+            }
+            
+            console.log('설정 후 값들:', {
+                dep: depField?.value,
+                dest: destField?.value,
+                altn: altnField?.value,
+                refile: refileField?.value,
+                edto: edtoField?.value
+            });
+            
+            // 전역 변수에 저장 (분석 버튼에서 사용)
+            window.extractedFlightInfo = flightInfo;
+        }
+        
+        // 추출 성공 알림 표시
+        function showExtractionSuccess(flightInfo) {
+            // 기존 알림 제거
+            const existingAlert = document.querySelector('.extraction-alert');
+            if (existingAlert) {
+                existingAlert.remove();
+            }
+            
+            // 성공 알림 생성
+            const alertDiv = document.createElement('div');
+            alertDiv.className = 'alert alert-success alert-dismissible fade show extraction-alert';
+            alertDiv.style.position = 'fixed';
+            alertDiv.style.top = '20px';
+            alertDiv.style.right = '20px';
+            alertDiv.style.zIndex = '9999';
+            alertDiv.style.minWidth = '400px';
+            
+            let extractedInfo = [];
+            if (flightInfo.dep) extractedInfo.push(`DEP: ${flightInfo.dep}`);
+            if (flightInfo.dest) extractedInfo.push(`DEST: ${flightInfo.dest}`);
+            if (flightInfo.altn) extractedInfo.push(`ALTN: ${flightInfo.altn}`);
+            if (flightInfo.refile) extractedInfo.push(`REFILE: ${flightInfo.refile}`);
+            if (flightInfo.edto) extractedInfo.push(`EDTO: ${flightInfo.edto}`);
+            
+            alertDiv.innerHTML = `
+                <h6 class="alert-heading">✨ 공항 정보 자동 추출 완료</h6>
+                <p class="mb-2">NOTAM에서 다음 정보를 자동으로 추출했습니다:</p>
+                <p class="mb-0"><strong>${extractedInfo.join(' | ')}</strong></p>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            document.body.appendChild(alertDiv);
+            
+            // 5초 후 자동 제거
+            setTimeout(() => {
+                if (alertDiv.parentNode) {
+                    alertDiv.remove();
+                }
+            }, 5000);
+        }
+        
+        // 추출된 항공편 정보 표시 및 입력 필드 자동 채우기
+        function displayExtractedFlightInfo(flightInfo) {
+            const resultDiv = document.getElementById('airportAnalysisResult');
+            const contentDiv = document.getElementById('airportAnalysisContent');
+            
+            // 입력 필드 자동 채우기
+            if (flightInfo.dep) {
+                document.getElementById('depAirport').value = flightInfo.dep;
+            }
+            if (flightInfo.dest) {
+                document.getElementById('destAirport').value = flightInfo.dest;
+            }
+            if (flightInfo.altn) {
+                document.getElementById('altnAirport').value = flightInfo.altn;
+            }
+            if (flightInfo.refile) {
+                document.getElementById('refileAirport').value = flightInfo.refile;
+            }
+            if (flightInfo.edto) {
+                document.getElementById('edtoAirport').value = flightInfo.edto;
+            }
+            
+            // 추출 결과 표시
+            let html = `
+                <div class="alert alert-success">
+                    <h6 class="alert-heading">✨ 공항 정보 자동 추출 완료</h6>
+                    <p class="mb-2">NOTAM 텍스트에서 항공편 정보를 자동으로 추출했습니다.</p>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>📋 추출된 공항 정보</h6>
+                        <table class="table table-sm">
+                            <tr>
+                                <td><strong>DEP (출발):</strong></td>
+                                <td>${flightInfo.dep || '추출되지 않음'}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>DEST (목적지):</strong></td>
+                                <td>${flightInfo.dest || '추출되지 않음'}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>ALTN (대체):</strong></td>
+                                <td>${flightInfo.altn || '추출되지 않음'}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>REFILE:</strong></td>
+                                <td>${flightInfo.refile || '추출되지 않음'}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>EDTO:</strong></td>
+                                <td>${flightInfo.edto || '추출되지 않음'}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>📊 추출 신뢰도</h6>
+                        <div class="mb-2">
+                            <small>DEP: ${(flightInfo.confidence.dep * 100).toFixed(0)}%</small>
+                            <div class="progress" style="height: 5px;">
+                                <div class="progress-bar" style="width: ${flightInfo.confidence.dep * 100}%"></div>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <small>DEST: ${(flightInfo.confidence.dest * 100).toFixed(0)}%</small>
+                            <div class="progress" style="height: 5px;">
+                                <div class="progress-bar" style="width: ${flightInfo.confidence.dest * 100}%"></div>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <small>ALTN: ${(flightInfo.confidence.altn * 100).toFixed(0)}%</small>
+                            <div class="progress" style="height: 5px;">
+                                <div class="progress-bar" style="width: ${flightInfo.confidence.altn * 100}%"></div>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <small>REFILE: ${(flightInfo.confidence.refile * 100).toFixed(0)}%</small>
+                            <div class="progress" style="height: 5px;">
+                                <div class="progress-bar" style="width: ${flightInfo.confidence.refile * 100}%"></div>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <small>EDTO: ${(flightInfo.confidence.edto * 100).toFixed(0)}%</small>
+                            <div class="progress" style="height: 5px;">
+                                <div class="progress-bar" style="width: ${flightInfo.confidence.edto * 100}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            if (flightInfo.route) {
+                html += `
+                    <div class="mt-3">
+                        <h6>🛫 추출된 항로 정보</h6>
+                        <div class="alert alert-light">
+                            <code>${flightInfo.route}</code>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            if (flightInfo.all_airports && flightInfo.all_airports.length > 0) {
+                html += `
+                    <div class="mt-3">
+                        <h6>🌍 발견된 모든 공항</h6>
+                        <div class="d-flex flex-wrap">
+                            ${flightInfo.all_airports.map(airport => 
+                                `<span class="badge bg-secondary me-1 mb-1">${airport}</span>`
+                            ).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            if (flightInfo.notam_details && flightInfo.notam_details.length > 0) {
+                html += `
+                    <div class="mt-3">
+                        <h6>📄 관련 NOTAM 상세</h6>
+                        <div class="accordion" id="notamAccordion">
+                            ${flightInfo.notam_details.map((detail, index) => `
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header" id="heading${index}">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${index}">
+                                            NOTAM ${detail.notam_id} - ${detail.airports.join(', ')}
+                                        </button>
+                                    </h2>
+                                    <div id="collapse${index}" class="accordion-collapse collapse" data-bs-parent="#notamAccordion">
+                                        <div class="accordion-body">
+                                            <small>
+                                                DEP: ${detail.flight_info.dep || 'N/A'} | 
+                                                DEST: ${detail.flight_info.dest || 'N/A'} | 
+                                                ALTN: ${detail.flight_info.altn || 'N/A'} | 
+                                                EDTO: ${detail.flight_info.edto || 'N/A'}
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            html += `
+                <div class="mt-3">
+                    <div class="alert alert-info">
+                        <h6 class="alert-heading">💡 다음 단계</h6>
+                        <p class="mb-2">추출된 공항 정보가 입력 필드에 자동으로 채워졌습니다.</p>
+                        <p class="mb-0">이제 <strong>"공항별 NOTAM 분석 시작"</strong> 또는 <strong>"AI 종합 분석 (GEMINI)"</strong> 버튼을 클릭하여 분석을 진행하세요.</p>
+                    </div>
+                </div>
+            `;
+            
+            contentDiv.innerHTML = html;
+            resultDiv.style.display = 'block';
+            
+            // 결과 영역으로 스크롤
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        // 페이지 로드 완료 후 자동 추출 실행
+        document.addEventListener('DOMContentLoaded', function() {
+            // 약간의 지연 후 자동 추출 실행 (NOTAM 데이터 로드 완료 대기)
+            setTimeout(() => {
+                autoExtractFlightInfo();
+            }, 1000);
+        });
     </script>
 </body>
 </html>

@@ -21,6 +21,10 @@ from src.notam_translator import NOTAMTranslator
 from src.hybrid_translator import HybridNOTAMTranslator
 from src.parallel_translator import ParallelHybridNOTAMTranslator
 from src.integrated_translator import IntegratedNOTAMTranslator
+# from src.fir_notam_filter import analyze_route_with_fir_notams  # FIR 기반 분석 비활성화
+from src.airport_notam_analyzer import analyze_flight_airports
+from src.notam_comprehensive_analyzer import analyze_flight_airports_comprehensive
+from src.flight_info_extractor import extract_flight_info_from_notams
 from dotenv import load_dotenv
 
 # 환경 변수 로드
@@ -283,7 +287,7 @@ def health_check():
 
 @app.route('/api/analyze_route', methods=['POST'])
 def analyze_route():
-    """GEMINI를 사용한 AI 기반 루트 분석 API"""
+    """GEMINI를 사용한 AI 기반 루트 분석 API (FIR 분석 포함)"""
     logger.info("analyze_route API 호출됨")
     try:
         data = request.get_json()
@@ -296,18 +300,143 @@ def analyze_route():
         logger.info(f"분석할 항로: {route}")
         logger.info(f"NOTAM 데이터 개수: {len(notam_data)}")
         
-        # GEMINI를 사용한 루트 분석
-        analysis_result = analyze_route_with_gemini(route, notam_data)
+        # GEMINI를 사용한 AI 기반 루트 분석 (기존 방식)
+        gemini_analysis = analyze_route_with_gemini(route, notam_data)
         
         return jsonify({
             'route': route,
-            'analysis': analysis_result,
+            'gemini_analysis': gemini_analysis,
             'timestamp': datetime.now().isoformat()
         })
         
     except Exception as e:
         logger.error(f"루트 분석 중 오류: {str(e)}")
         return jsonify({'error': f'루트 분석 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/analyze_airports', methods=['POST'])
+def analyze_airports():
+    """공항별 주요 NOTAM 분석 API"""
+    try:
+        data = request.get_json()
+        
+        # 필수 파라미터 확인
+        dep = data.get('dep', '').strip().upper()
+        dest = data.get('dest', '').strip().upper()
+        notam_data = data.get('notam_data', [])
+        
+        if not dep or not dest:
+            return jsonify({'error': '출발지(DEP)와 목적지(DEST) 공항을 입력해주세요.'}), 400
+        
+        # 선택적 파라미터
+        altn = data.get('altn', '').strip().upper() or None
+        edto = data.get('edto', '').strip().upper() or None
+        
+        logger.info(f"공항별 NOTAM 분석 요청: DEP={dep}, DEST={dest}, ALTN={altn}, EDTO={edto}")
+        logger.info(f"NOTAM 데이터 개수: {len(notam_data)}")
+        
+        # 공항별 NOTAM 분석 실행
+        analysis_result = analyze_flight_airports(
+            dep=dep,
+            dest=dest,
+            altn=altn,
+            edto=edto,
+            notams_data=notam_data
+        )
+        
+        return jsonify({
+            'dep': dep,
+            'dest': dest,
+            'altn': altn,
+            'edto': edto,
+            'analysis_result': analysis_result,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"공항별 NOTAM 분석 중 오류: {str(e)}")
+        return jsonify({'error': f'공항별 NOTAM 분석 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/analyze_airports_comprehensive', methods=['POST'])
+def analyze_airports_comprehensive():
+    """공항별 종합 NOTAM 분석 API (GEMINI AI 활용)"""
+    try:
+        data = request.get_json()
+        
+        # 필수 파라미터 확인
+        dep = data.get('dep', '').strip().upper()
+        dest = data.get('dest', '').strip().upper()
+        notam_data = data.get('notam_data', [])
+        
+        if not dep or not dest:
+            return jsonify({'error': '출발지(DEP)와 목적지(DEST) 공항을 입력해주세요.'}), 400
+        
+        # 선택적 파라미터
+        altn = data.get('altn', '').strip().upper() or None
+        edto = data.get('edto', '').strip().upper() or None
+        
+        logger.info(f"공항별 종합 NOTAM 분석 요청: DEP={dep}, DEST={dest}, ALTN={altn}, EDTO={edto}")
+        logger.info(f"NOTAM 데이터 개수: {len(notam_data)}")
+        
+        # 공항별 종합 NOTAM 분석 실행 (GEMINI AI)
+        analysis_result = analyze_flight_airports_comprehensive(
+            dep=dep,
+            dest=dest,
+            altn=altn,
+            edto=edto,
+            notams_data=notam_data
+        )
+        
+        return jsonify({
+            'dep': dep,
+            'dest': dest,
+            'altn': altn,
+            'edto': edto,
+            'analysis_result': analysis_result,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"공항별 종합 NOTAM 분석 중 오류: {str(e)}")
+        return jsonify({'error': f'공항별 종합 NOTAM 분석 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/extract_flight_info', methods=['POST'])
+def extract_flight_info():
+    """NOTAM에서 항공편 정보 자동 추출 API"""
+    try:
+        # temp 폴더에서 가장 최근 txt 파일 찾기
+        temp_folder = 'temp'
+        if not os.path.exists(temp_folder):
+            return jsonify({'error': 'temp 폴더를 찾을 수 없습니다.'}), 404
+        
+        # 가장 최근 txt 파일 찾기
+        txt_files = [f for f in os.listdir(temp_folder) if f.endswith('_split.txt')]
+        if not txt_files:
+            return jsonify({'error': 'NOTAM txt 파일을 찾을 수 없습니다.'}), 404
+        
+        # 가장 최근 파일 선택 (파일명 기준)
+        latest_file = max(txt_files)
+        txt_path = os.path.join(temp_folder, latest_file)
+        
+        logger.info(f"원본 txt 파일에서 공항 정보 추출: {latest_file}")
+        
+        # 원본 txt 파일에서 직접 읽기
+        with open(txt_path, 'r', encoding='utf-8') as f:
+            notam_text = f.read()
+        
+        logger.info(f"원본 txt 파일 읽기 완료: {len(notam_text)} 문자")
+        
+        # NOTAM에서 항공편 정보 추출
+        flight_info = extract_flight_info_from_notams(notam_text)
+        
+        return jsonify({
+            'flight_info': flight_info,
+            'source_file': latest_file,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"항공편 정보 추출 중 오류: {str(e)}")
+        return jsonify({'error': f'항공편 정보 추출 중 오류가 발생했습니다: {str(e)}'}), 500
 
 def analyze_route_with_gemini(route, notam_data):
     """GEMINI를 사용한 루트 분석 - NOTAM과 항로 연관성 중심"""

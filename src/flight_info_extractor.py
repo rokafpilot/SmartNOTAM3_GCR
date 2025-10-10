@@ -185,6 +185,39 @@ class FlightInfoExtractor:
                             package_info['edto'] = ' '.join(valid_airports)
                             print(f"EDTO 추출 (라인 {i+1}): {package_info['edto']}")
         
+        # 추가 검색: REFILE과 EDTO가 다른 형태로 있을 수 있음
+        if 'refile' not in package_info:
+            for i, line in enumerate(original_lines):
+                line_upper = line.upper().strip()
+                if 'REFILE:' in line_upper:
+                    print(f"REFILE 라인 발견 (라인 {i+1}): '{line}'")
+                    # 더 유연한 패턴으로 시도
+                    refile_match = re.search(r'REFILE:\s*([A-Z\s]+)', line_upper)
+                    if refile_match:
+                        airports_text = refile_match.group(1).strip()
+                        airports = re.findall(self.airport_pattern, airports_text)
+                        valid_airports = [airport for airport in airports if self._is_valid_airport(airport)]
+                        if valid_airports:
+                            package_info['refile'] = ' '.join(valid_airports)
+                            print(f"REFILE 추출 (라인 {i+1}): {package_info['refile']}")
+                            break
+        
+        if 'edto' not in package_info:
+            for i, line in enumerate(original_lines):
+                line_upper = line.upper().strip()
+                if 'EDTO:' in line_upper:
+                    print(f"EDTO 라인 발견 (라인 {i+1}): '{line}'")
+                    # 더 유연한 패턴으로 시도
+                    edto_match = re.search(r'EDTO:\s*([A-Z\s]+)', line_upper)
+                    if edto_match:
+                        airports_text = edto_match.group(1).strip()
+                        airports = re.findall(self.airport_pattern, airports_text)
+                        valid_airports = [airport for airport in airports if self._is_valid_airport(airport)]
+                        if valid_airports:
+                            package_info['edto'] = ' '.join(valid_airports)
+                            print(f"EDTO 추출 (라인 {i+1}): {package_info['edto']}")
+                            break
+        
         return package_info
     
     def _split_by_packages(self, lines: List[str]) -> Dict[str, List[str]]:
